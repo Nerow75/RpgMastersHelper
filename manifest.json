@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dofus Masters Helper",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Recommandations de caractéristiques, d'équipement et de decks de sorts pour Dofus Masters.",
   "permissions": [
     "storage"

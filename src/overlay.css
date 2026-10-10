@@ -981,3 +981,49 @@
   width: 100%;
   margin-top: 6px;
 }
+
+/* ---------- Étapes faites, deck actif ---------- */
+
+#dmx-panel .dmx-todo > li.dmx-done {
+  align-items: center;
+  padding: 6px 10px;
+  border-color: color-mix(in srgb, var(--dmx-leaf) 35%, var(--dmx-line));
+  background: color-mix(in srgb, var(--dmx-leaf) 8%, transparent);
+  animation: dmx-done-in 0.4s var(--dmx-ease);
+}
+
+#dmx-panel .dmx-todo > li.dmx-done .dmx-todo-title {
+  color: var(--dmx-leaf);
+  font-size: 0.85rem;
+}
+
+#dmx-panel .dmx-todo > li.dmx-done .dmx-todo-num {
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+}
+
+@keyframes dmx-done-in {
+  from {
+    transform: scale(0.97);
+    background: color-mix(in srgb, var(--dmx-leaf) 30%, transparent);
+  }
+}
+
+#dmx-panel .dmx-deck-active {
+  border-color: color-mix(in srgb, var(--dmx-leaf) 55%, var(--dmx-line));
+}
+
+#dmx-panel .dmx-sync-status {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dmx-panel .dmx-todo > li.dmx-done {
+    animation: none;
+  }
+}
+
+#dmx-panel .dmx-live {
+  color: var(--dmx-leaf);
+}

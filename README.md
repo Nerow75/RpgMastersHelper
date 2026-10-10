@@ -38,8 +38,10 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 
 ### Conseils
 - **À faire maintenant** : une liste d'actions concrètes et ordonnées (placer ses points,
-  équiper un meilleur objet, importer un deck, aller combattre), chacune avec un lien vers la
-  page du jeu concernée.
+  équiper un meilleur objet, mettre le deck conseillé, combattre les Recherchés et Archimages
+  de la Chasse ou avancer dans l'Aventure), chacune avec un lien vers la page du jeu concernée.
+  Les étapes **se cochent d'elles-mêmes** une fois réalisées ; celles qui ne peuvent pas être
+  détectées (les combats) se cochent à la main, pour la journée.
 - **Profil détecté automatiquement** : niveau, prestige, classe et élément du build (déduit de
   l'équipement porté). Classe et élément restent modifiables.
 - **Points de caractéristique**, selon quatre stratégies au choix :
@@ -53,7 +55,9 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 
 ### Sorts
 - Passif de la classe et sorts les plus rentables (dégâts moyens par PA) dans l'élément choisi.
-- **Trois decks de 10 sorts** (Dégâts, Équilibré, Survie) avec les icônes du jeu.
+- **Trois decks** (Dégâts, Équilibré, Survie) composés uniquement de sorts que le personnage
+  peut réellement utiliser, à la taille de deck du jeu, avec les icônes du jeu. Le deck déjà
+  équipé est signalé.
 - Bouton **« Copier le code du deck »** : génère un code au format officiel `DM-S-…`, à coller
   dans *Deck → Importer un code*. C'est le jeu qui valide et applique le deck.
 
@@ -109,7 +113,7 @@ Après une mise à jour des fichiers : bouton ↻ sur la carte de l'extension, p
 | Afficher / masquer | Icône de l'extension dans la barre d'outils, bouton ×, ou bouton rond en bas à droite |
 | Replier | Bouton ⌃ dans le titre du panneau |
 | Déplacer | Tirer le titre du panneau ; double-clic pour revenir à la position d'origine |
-| Forcer la mise à jour des données | Bouton **Mettre à jour** en bas du panneau |
+| Mise à jour des données | Automatique ; bouton **↻ Tout relire** pour forcer la relecture complète |
 | Importer un deck | **Copier le code du deck**, puis *Deck → Importer un code* dans le jeu |
 
 ---
@@ -135,11 +139,23 @@ des composants dans le HTML, sous forme de fragments `self.__next_f.push([1, "�
 | `/bestiaire?onglet=objets&n=5000` | objets et statistiques | au plus 1 fois / 24 h |
 | `/collection?onglet=objets&n=5000` | objets, possession | au plus 1 fois / 24 h |
 | `/collection?onglet=sorts` | sorts | au plus 1 fois / 24 h |
-| `/personnage` | niveau, prestige, classe, équipement, inventaire, caractéristiques, points libres | au plus 1 fois / 10 min |
+| `/personnage` | niveau, prestige, classe, équipement, inventaire, caractéristiques, points libres | après une action du joueur (voir ci-dessous) |
+| `/deck` | sorts utilisables, deck actif, taille d'un deck, classe | avec `/personnage` |
 
-Les requêtes ne partent qu'**au chargement d'une page du jeu**, et seulement si les données en
-cache sont plus anciennes que ces délais. Elles sont séquentielles, jamais parallèles. Si une
-page échoue, les autres sont conservées et l'erreur est signalée dans le panneau.
+Le **catalogue** (quatre premières lignes) n'est relu qu'au chargement d'une page du jeu, s'il
+a plus de 24 heures, ou à la demande (bouton « Tout relire »).
+
+La **fiche du personnage** (`/personnage` et `/deck`, soit deux requêtes) est relue pour que
+les conseils suivent ce que fait le joueur :
+
+- quand il change de page sur le site ;
+- quand il revient sur l'onglet ;
+- après un clic sur un bouton des pages Personnage, Deck ou Inventaire ;
+- au chargement d'une page, si la dernière lecture date de plus de 10 minutes.
+
+Ces relectures n'ont lieu que si l'onglet est visible, au plus **une fois toutes les 3 secondes**,
+avec `cache: "no-store"` pour obtenir l'état actuel. Toutes les requêtes sont séquentielles. Si
+une page échoue, les autres sont conservées et l'erreur est signalée dans le panneau.
 
 ### Calculs
 
@@ -147,8 +163,11 @@ page échoue, les autres sont conservées et l'erreur est signalée dans le pann
 - **Note d'un objet** : somme pondérée de ses stats pour l'élément choisi (poids dans
   `WEIGHTS`, `src/advisor.js` ; par exemple 1 PA ≈ 100 points de stat principale). C'est une
   estimation, ajustable.
-- **Decks** : sorts de la classe accessibles au niveau du joueur, classés par dégâts moyens par
-  PA dans l'élément, complétés par des sorts de soutien selon le style du deck.
+- **Decks** : sorts utilisables par le personnage (liste fournie par la page Deck), classés par
+  dégâts moyens par PA dans l'élément, complétés par des sorts de soutien selon le style du
+  deck. Un deck est considéré comme équipé si le deck actif contient tous ses sorts.
+- **Étapes faites** : une étape qui disparaît après une relecture de la fiche (points placés,
+  objet équipé, deck en place) est affichée comme faite jusqu'au rechargement de la page.
 - **Code de deck** : même encodage que le bouton « Code du deck » du site (version `2`, classe,
   nombre de cartes et identifiants en entiers variables, base 32, contrôle FNV-1a). Il a été
   vérifié comme identique à l'encodeur du site, cas limites compris.
@@ -167,9 +186,11 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
 | Champs `monsters` (`gfx`, `race`, `lo`, `hi`, `z`, `d`) et `zones` | Bestiaire |
 | Champs `card` / `cards` (`ap`, `eff`, `cls`, `lvl`, `icon`) | Sorts et decks |
 | Props du menu profil (`level`, `kamas`) | Niveau |
-| Bloc `{ classes, current }` de `/personnage` | Classe actuelle |
+| Props du composant Deck (`collection` `{ key, card }`, `initialDecks`, `initialActive`, `breedId`, `deckSize`) | Sorts utilisables, deck actif, classe, taille des decks |
+| Bloc `{ classes, current }` de `/personnage` | Classe actuelle (si la page Deck est illisible) |
 | Champs `slots`, `inventory`, `rows` (`base`, `tiers`), `pointsFree`, `prestige` | Fiche personnage |
 | Paramètre `n` des listes d'objets | Lecture du catalogue complet |
+| Chemins `/personnage`, `/deck`, `/inventaire`, `/chasse`, `/aventure` | Liens et détection des actions du joueur |
 | Format des codes de deck `DM-S-…` | Bouton de copie du deck |
 | Images `/img/items/`, `/img/spells/sort_`, `/img/monsters/`, `/img/breeds/` | Icônes |
 | Variables CSS `--color-*`, `--font-*`, `--dm-*` | Apparence (valeurs de secours intégrées) |
@@ -230,7 +251,8 @@ l'encodage des codes de deck (comparé à celui du site), l'interface et la mém
 
 - La **note des objets** et la **composition des decks** reposent sur des heuristiques ; elles
   ne remplacent pas la connaissance fine du jeu.
-- La **taille d'un deck** (10) et le format du code sont repris du site à la date d'écriture.
+- Le format du code de deck est repris du site à la date d'écriture.
+- Les combats (Chasse, Aventure) ne sont pas détectés : l'étape se coche à la main.
 - Certaines mécaniques ne sont pas modélisées : bonus de panoplie, prestige dans les calculs,
   plafonds de PA.
 - Une modification de la structure des données du site peut nécessiter une adaptation

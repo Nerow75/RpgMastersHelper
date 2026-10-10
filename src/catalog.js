@@ -4,7 +4,10 @@
 var DMX_CATALOG = (() => {
   const KEY = "dmx-catalog";
   const CATALOG_MAX_AGE = 24 * 60 * 60 * 1000; // objets, monstres, sorts : une fois par jour
-  const CHARACTER_MAX_AGE = 10 * 60 * 1000; // personnage : toutes les 10 minutes
+  // Personnage et deck : relus quand le joueur agit (voir overlay.js), au plus toutes les 3 s,
+  // et au moins toutes les 10 min.
+  const CHARACTER_MIN_INTERVAL = 3 * 1000;
+  const CHARACTER_MAX_AGE = 10 * 60 * 1000;
 
   // `n` demande au site d'afficher plus d'objets d'un coup (comme le bouton « Voir plus »).
   const PAGES = {
@@ -13,6 +16,7 @@ var DMX_CATALOG = (() => {
     collectionItems: "/collection?onglet=objets&n=5000",
     spells: "/collection?onglet=sorts",
     character: "/personnage",
+    deck: "/deck",
   };
 
   const empty = () => ({
@@ -93,7 +97,41 @@ var DMX_CATALOG = (() => {
       for (const cls of classes) for (const card of cls.cards || []) catalog.cards[card.id] = card;
     }
     addItems(catalog.character.slots.map((s) => s.item).filter(Boolean));
+    catalog.character.deck = await syncDeck();
+    // La page Deck donne la classe de façon sûre (breedId) ; sinon, celle de la fiche.
+    catalog.character.classId = catalog.character.deck?.classId ?? catalog.character.classId;
     catalog.characterAt = Date.now();
+  }
+
+  // Page Deck : props du composant DeckBuilder { collection, initialDecks, initialActive,
+  // breedId, deckSize }. `collection` = les sorts que le personnage peut mettre dans un deck,
+  // sous la forme { key: "id:…", card }. Les decks sont des listes de ces clés.
+  async function syncDeck() {
+    try {
+      const values = await DMX_GAME.fetchPageData(PAGES.deck);
+      const props = DMX_GAME.findObject(values, ["collection", "initialDecks"]);
+      if (!props || !Array.isArray(props.collection)) return null;
+      const idOf = (key) => Number(String(key).split(":")[0]);
+      const usableCardIds = [];
+      for (const entry of props.collection) {
+        const card = entry?.card;
+        if (card?.id != null) catalog.cards[card.id] = card;
+        const id = card?.id ?? idOf(entry?.key);
+        if (Number.isInteger(id)) usableCardIds.push(id);
+      }
+      const decks = Array.isArray(props.initialDecks) ? props.initialDecks : [];
+      const active = Number.isInteger(props.initialActive) ? props.initialActive : 0;
+      return {
+        usableCardIds,
+        activeDeckIds: (decks[active] || []).map(idOf).filter(Number.isInteger),
+        activeIndex: active,
+        size: Number.isInteger(props.deckSize) ? props.deckSize : null,
+        classId: Number.isInteger(props.breedId) ? props.breedId : null,
+      };
+    } catch (err) {
+      if (err.message === "non connecté") throw err;
+      return null; // page Deck illisible : on garde le reste de la fiche
+    }
   }
 
   // Chaque page est lue indépendamment : si l'une échoue, les autres sont gardées.
@@ -144,5 +182,14 @@ var DMX_CATALOG = (() => {
     return catalog;
   }
 
-  return { load, refresh, get: () => catalog };
+  // Relit seulement le personnage et le deck (après une action du joueur).
+  // Retourne false si la dernière lecture est trop récente.
+  async function refreshCharacter() {
+    if (Date.now() - catalog.characterAt < CHARACTER_MIN_INTERVAL) return false;
+    await syncCharacter();
+    await save();
+    return true;
+  }
+
+  return { load, refresh, refreshCharacter, get: () => catalog };
 })();

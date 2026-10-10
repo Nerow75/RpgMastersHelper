@@ -167,7 +167,8 @@ var DMX_GAME = (() => {
 
   // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
   async function fetchPageData(url) {
-    const res = await fetch(url, { credentials: "same-origin" });
+    // no-store : toujours la version actuelle de la page, jamais une copie en cache.
+    const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
     if (res.redirected && new URL(res.url).pathname.startsWith("/connexion")) {
       throw new Error("non connecté");
     }

@@ -190,14 +190,20 @@ var DMX_ADVISOR = (() => {
 
   // Classe chaque sort de la classe : dégâts dans l'élément (dégâts moyens par PA),
   // soutien (sur soi / un allié) ou autre.
-  function classifySpells({ cards, classId, level, elementKey, ownedCardIds }) {
+  // `usableCardIds` (page Deck du jeu) : si connu, seuls ces sorts sont proposés, car le jeu
+  // refuse les autres à l'import d'un code de deck.
+  function classifySpells({ cards, classId, level, elementKey, ownedCardIds, usableCardIds }) {
     const el = ELEMENTS[elementKey];
     const damage = [];
     const support = [];
     const other = [];
     for (const card of cards) {
-      if (card.cls !== classId || (level != null && card.lvl > level)) continue;
-      const owned = ownedCardIds ? ownedCardIds.has(card.id) : null;
+      if (usableCardIds) {
+        if (!usableCardIds.has(card.id)) continue;
+      } else if (card.cls !== classId || (level != null && card.lvl > level)) {
+        continue;
+      }
+      const owned = usableCardIds ? true : ownedCardIds ? ownedCardIds.has(card.id) : null;
       const eff = card.eff || [];
       const dmg = eff.filter(
         (e) => DAMAGE_KINDS.includes(e.k) && (e.el == null || e.el === el.code || e.el === "best")
@@ -224,8 +230,9 @@ var DMX_ADVISOR = (() => {
     return { damage, support };
   }
 
-  // Decks de 10 cartes selon trois styles de jeu.
+  // Decks selon trois styles de jeu (taille donnée par le jeu, 10 par défaut).
   function buildDecks(args) {
+    const size = args.deckSize || DECK_SIZE;
     const { damage, support, other } = classifySpells(args);
     const el = ELEMENTS[args.elementKey];
     const recipes = [
@@ -242,14 +249,22 @@ var DMX_ADVISOR = (() => {
       ];
       // Complète jusqu'à 10 avec les meilleurs sorts restants.
       const rest = [...damage, ...support, ...other].filter((x) => !picked.includes(x));
-      while (picked.length < DECK_SIZE && rest.length) picked.push(rest.shift());
+      while (picked.length < size && rest.length) picked.push(rest.shift());
+      picked.splice(size);
       if (!picked.length) continue;
       const ids = picked.map((x) => x.card.id).join(",");
       if (decks.some((d) => d.cards.map((x) => x.card.id).join(",") === ids)) continue;
-      decks.push({ ...r, cards: picked });
+      decks.push({ ...r, cards: picked, size });
     }
     return decks;
   }
 
-  return { ELEMENTS, DECK_SIZE, itemScore, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
+  // Vrai si le deck actif du joueur contient déjà tous les sorts de ce deck.
+  function deckIsActive(deck, activeDeckIds) {
+    if (!activeDeckIds?.length) return false;
+    const active = new Set(activeDeckIds);
+    return deck.cards.every((x) => active.has(x.card.id));
+  }
+
+  return { ELEMENTS, DECK_SIZE, deckIsActive, itemScore, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
 })();

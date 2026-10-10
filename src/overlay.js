@@ -15,6 +15,7 @@
     visible: true,
     welcomed: false, // message d'accueil déjà fermé
     collapsed: false, // panneau replié sur son en-tête
+    doneToday: {}, // étapes cochées à la main : { clé: "AAAA-MM-JJ" }
     pos: null, // { left, top } si le joueur l'a déplacé
     pointsMode: "optimal", // optimal | element | vitalite | libre
     customPoints: {}, // mode libre : { clé de stat: points }
@@ -68,7 +69,7 @@
     <div class="dmx-tooltip" role="tooltip" hidden></div>
     <div class="dmx-footer">
       <span class="dmx-sync-status"></span>
-      <button class="dmx-sync">Mettre à jour</button>
+      <button class="dmx-sync" title="Relire maintenant toutes les données du jeu">↻ Tout relire</button>
       <button class="dmx-export" title="Pour aider au développement de l'extension">Exporter</button>
       <textarea class="dmx-export-out" readonly hidden></textarea>
     </div>
@@ -166,6 +167,10 @@
       classId: settings.classId ?? detectedClass,
       ownedIds,
       ownedCardIds: cat.ownedCardIds.length ? new Set(cat.ownedCardIds) : null,
+      // Page Deck du jeu : sorts utilisables, deck actif, taille d'un deck.
+      usableCardIds: character?.deck?.usableCardIds?.length ? new Set(character.deck.usableCardIds) : null,
+      activeDeckIds: character?.deck?.activeDeckIds || [],
+      deckSize: character?.deck?.size || DMX_ADVISOR.DECK_SIZE,
     };
   }
 
@@ -335,13 +340,31 @@
   }
 
   // Liste d'actions concrètes, dans l'ordre, avec un bouton vers la bonne page.
+  function deckArgs(s) {
+    return {
+      cards: Object.values(s.cat.cards),
+      classId: s.classId,
+      level: s.level,
+      elementKey: s.elementKey,
+      ownedCardIds: s.ownedCardIds,
+      usableCardIds: s.usableCardIds,
+      deckSize: s.deckSize,
+    };
+  }
+
+  // Jour courant (AAAA-MM-JJ), pour les étapes « faites aujourd'hui ».
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  // Liste d'actions concrètes, dans l'ordre. Chaque étape a une clé stable : quand une étape
+  // disparaît après une relecture du personnage, c'est qu'elle a été faite (voir renderTodo).
   function todoSteps(s) {
     const steps = [];
     const c = s.character;
     if (!c) {
       steps.push({
+        key: "login",
         title: "Connecte-toi au jeu",
-        text: "Le conseiller lit ton personnage : il faut être connecté, puis clique sur « Mettre à jour ».",
+        text: "Le conseiller lit ton personnage : connecte-toi, il se met à jour tout seul.",
       });
       return steps;
     }
@@ -349,9 +372,11 @@
       const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, settings.pointsMode, s.elementKey, settings.customPoints);
       const summary = plan.alloc.map((a) => `+${a.gain} ${a.row.label}`).join(", ");
       steps.push({
+        key: "points",
         title: `Place tes ${c.pointsFree} points de caractéristique`,
         text: summary ? `Conseillé : ${summary}. Sur la page Personnage, clique sur « + » à côté de chaque
           caractéristique.` : "Choisis une répartition plus bas.",
+        doneTitle: "Points de caractéristique placés",
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
@@ -364,52 +389,77 @@
     });
     for (const u of upgrades.slice(0, 3)) {
       steps.push({
+        key: `equip:${u.to.id}`,
         title: `Équipe ${u.to.n}`,
         text: `${u.label} : ${u.from ? `à la place de ${u.from.n}` : "emplacement vide"}. Tu l'as déjà
           dans ton inventaire (+${u.gain} pts).`,
+        doneTitle: `${u.to.n} équipé`,
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
     if (s.classId == null) {
-      steps.push({ title: "Choisis ta classe", text: "En haut du panneau, pour recevoir des decks de sorts." });
+      steps.push({ key: "class", title: "Choisis ta classe", text: "En haut du panneau, pour recevoir des decks de sorts." });
     } else {
-      currentDecks = DMX_ADVISOR.buildDecks({
-        cards: Object.values(s.cat.cards),
-        classId: s.classId,
-        level: s.level,
-        elementKey: s.elementKey,
-        ownedCardIds: s.ownedCardIds,
-      });
-      if (currentDecks.length) {
+      currentDecks = DMX_ADVISOR.buildDecks(deckArgs(s));
+      const best = currentDecks[0];
+      if (best && !DMX_ADVISOR.deckIsActive(best, s.activeDeckIds)) {
         steps.push({
-          title: `Essaie le deck « ${currentDecks[0].name} »`,
-          text: "Copie son code, puis dans Deck clique sur « Importer un code » et colle-le.",
+          key: `deck:${best.cards.map((x) => x.card.id).sort().join(",")}`,
+          title: `Mets le deck « ${best.name} »`,
+          text: "Copie son code, puis dans Deck clique sur « Importer un code », colle-le et enregistre.",
+          doneTitle: `Deck « ${best.name} » en place`,
           deck: 0,
           link: ["/deck", "Ouvrir Deck"],
         });
       }
     }
-    if (s.level != null) {
+    // Combat : on ne peut pas le détecter, le joueur le coche lui-même (une fois par jour).
+    if (settings.doneToday?.combat !== today()) {
       steps.push({
-        title: "Va combattre des monstres de ton niveau",
-        text: "Pour gagner de l'expérience et trouver de meilleurs objets.",
-        tab: ["bestiaire", "Voir les monstres"],
+        key: "combat",
+        title: "Combats pour progresser",
+        text: `Dans la Chasse, affronte les Recherchés et les Archimages ; ou avance dans l'Aventure
+          pour passer des paliers.`,
+        doneTitle: "Combats du jour faits",
+        links: [["/chasse", "Chasse"], ["/aventure", "Aventure"]],
+        manual: true,
       });
     }
     return steps;
   }
 
+  // Étapes faites pendant cette session : affichées cochées en bas de la liste.
+  let lastSteps = null;
+  const doneSteps = new Map();
+
   function renderTodo(s) {
-    return `<ol class="dmx-todo">${todoSteps(s)
+    const steps = todoSteps(s);
+    const keys = new Set(steps.map((x) => x.key));
+    // Une étape qui disparaît alors que la fiche était déjà lue = une étape faite.
+    if (lastSteps && s.character) {
+      for (const prev of lastSteps) if (!keys.has(prev.key) && prev.key !== "login") doneSteps.set(prev.key, prev);
+    }
+    for (const key of keys) doneSteps.delete(key);
+    lastSteps = s.character ? steps : null;
+
+    const active = steps
       .map((step, i) => `<li><span class="dmx-todo-num">${i + 1}</span><div>
         <div class="dmx-todo-title">${escapeHtml(step.title)}</div>
         <div class="dmx-dim">${escapeHtml(step.text)}</div>
         <div class="dmx-todo-actions">
           ${step.deck != null ? `<button class="dmx-btn-primary" data-deck="${step.deck}">Copier le code</button>` : ""}
           ${step.link ? `<a class="dmx-btn-ghost" href="${step.link[0]}">${step.link[1]} →</a>` : ""}
-          ${step.tab ? `<button class="dmx-btn-ghost" data-go-tab="${step.tab[0]}">${step.tab[1]} →</button>` : ""}
+          ${(step.links || []).map(([href, label]) => `<a class="dmx-btn-ghost" href="${href}">${label} →</a>`).join("")}
+          ${step.manual ? `<button class="dmx-btn-ghost" data-done="${step.key}">✓ C'est fait</button>` : ""}
         </div></div></li>`)
-      .join("")}</ol>`;
+      .join("");
+    const done = [...doneSteps.values()]
+      .map((step) => `<li class="dmx-done"><span class="dmx-todo-num">✓</span><div>
+        <div class="dmx-todo-title">${escapeHtml(step.doneTitle || step.title)}</div></div></li>`)
+      .join("");
+    if (!active && !done) return `<div class="dmx-callout">✔ Rien à faire pour l'instant, bravo !</div>`;
+    return `<ol class="dmx-todo">${active}${done}</ol>
+      ${!active ? `<div class="dmx-callout">✔ Tout est fait, bravo !</div>` : ""}`;
   }
 
   function renderWelcome() {
@@ -472,11 +522,16 @@
         title="${escapeHtml(`${card.n} · ${card.ap} PA${card.d ? `\n${card.d}` : ""}`)}">${spellIcon(card)}</span>`)
       .join("");
     const names = deck.cards.map(({ card }) => escapeHtml(card.n)).join(" · ");
-    return `<div class="dmx-row dmx-deck">
+    const active = DMX_ADVISOR.deckIsActive(deck, s.activeDeckIds);
+    const short = deck.cards.length < deck.size;
+    return `<div class="dmx-row dmx-deck${active ? " dmx-deck-active" : ""}">
       <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(deck.name)}</span>
-        <span class="dmx-chip">${deck.cards.length}/${DMX_ADVISOR.DECK_SIZE}</span>
+        <span class="dmx-chip">${deck.cards.length}/${deck.size}</span>
+        ${active ? `<span class="dmx-chip dmx-chip-up">✔ Ton deck actuel</span>` : ""}
         ${missing ? `<span class="dmx-chip">${missing} non obtenu${missing > 1 ? "s" : ""}</span>` : ""}</div>
       <div class="dmx-dim">${escapeHtml(deck.desc)}</div>
+      ${short ? `<p class="dmx-warn">Tu n'as que ${deck.cards.length} sorts utilisables : débloque-en d'autres
+        pour compléter ce deck.</p>` : ""}
       <div class="dmx-deck-grid">${tiles}</div>
       <div class="dmx-dim dmx-deck-names">${names}</div>
       <div class="dmx-deck-actions">
@@ -487,17 +542,11 @@
   }
 
   function renderSpells(s) {
-    const intro = `<p class="dmx-intro">Des decks de 10 sorts prêts à l'emploi pour ta classe et ton élément.
+    const intro = `<p class="dmx-intro">Des decks de ${s.deckSize} sorts prêts à l'emploi pour ta classe et ton élément.
       Clique sur « Copier le code », puis dans <strong>Deck</strong> → <strong>Importer un code</strong>, colle-le.</p>`;
     if (s.classId == null) return `${intro}<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
     const cls = s.cat.classes.find((c) => c.id === s.classId);
-    const args = {
-      cards: Object.values(s.cat.cards),
-      classId: s.classId,
-      level: s.level,
-      elementKey: s.elementKey,
-      ownedCardIds: s.ownedCardIds,
-    };
+    const args = deckArgs(s);
     currentDecks = DMX_ADVISOR.buildDecks(args);
     const { damage, support } = DMX_ADVISOR.spellAdvice(args);
     const el = ELEMENTS[s.elementKey];
@@ -507,7 +556,7 @@
           ${escapeHtml(cls.passive.desc)}</div>` : ""}</section>` : ""}
       <section><h4>Decks proposés</h4>
         ${currentDecks.length ? currentDecks.map((d, i) => deckHtml(d, s, i)).join("")
-          : `<p class="dmx-empty">Aucun sort connu pour cette classe : clique sur « Mettre à jour ».</p>`}</section>
+          : `<p class="dmx-empty">Aucun sort connu pour cette classe pour l'instant.</p>`}</section>
       <section><h4>Meilleurs sorts de dégâts ${el.label}</h4>
         ${damage.length ? `<ul>${damage.slice(0, 8).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
           : `<p class="dmx-empty">Aucun sort de dégâts ${el.label} connu pour cette classe.</p>`}</section>
@@ -586,13 +635,15 @@
     if (syncing) status.textContent = "Synchronisation…";
     else if (syncError) status.textContent = `⚠ ${syncError}`;
     else if (s.cat.syncErrors?.length) {
-      status.textContent = `⚠ Pages non lues : ${s.cat.syncErrors.join(", ")} (réessaie « Mettre à jour »)`;
+      status.textContent = `⚠ Pages non lues : ${s.cat.syncErrors.join(", ")} (réessaie « Tout relire »)`;
     }
     else if (s.cat.syncedAt) {
-      const minutes = Math.round((Date.now() - s.cat.syncedAt) / 60000);
-      status.textContent = `${s.items.length} objets · ${Object.keys(s.cat.cards).length} sorts · ${
-        minutes < 60 ? `il y a ${minutes} min` : `il y a ${Math.round(minutes / 60)} h`
-      }`;
+      // Le personnage se relit tout seul : on indique juste depuis quand il est à jour.
+      const seconds = Math.round((Date.now() - s.cat.characterAt) / 1000);
+      const ago = seconds < 60 ? "à l'instant" : seconds < 3600 ? `il y a ${Math.round(seconds / 60)} min`
+        : `il y a ${Math.round(seconds / 3600)} h`;
+      status.innerHTML = `<span class="dmx-live">●</span> Personnage à jour ${ago} · ${s.items.length} objets ·
+        ${Object.keys(s.cat.cards).length} sorts`;
     } else status.textContent = "Pas encore synchronisé";
     $(".dmx-sync").disabled = syncing;
   }
@@ -604,6 +655,8 @@
       b.classList.toggle("active", b.dataset.tab === settings.tab);
     }
     searchBox.hidden = settings.tab !== "bestiaire";
+    const focused = body.contains(document.activeElement) ? document.activeElement.dataset?.stat : null;
+    const caret = focused ? document.activeElement.selectionStart : null;
     // Une erreur dans un onglet ne doit pas figer tout le panneau.
     try {
       if (settings.tab === "sorts") body.innerHTML = renderSpells(s);
@@ -612,10 +665,77 @@
     } catch (err) {
       console.error("[Dofus Masters Helper]", err);
       body.innerHTML = `<p class="dmx-warn">⚠ Erreur d'affichage : ${escapeHtml(err.message)}.
-        Essaie « Mettre à jour » ; si ça persiste, clique sur « Exporter » et envoie le résultat.</p>`;
+        Essaie « Tout relire » ; si ça persiste, clique sur « Exporter » et envoie le résultat.</p>`;
+    }
+    if (focused) {
+      const input = body.querySelector(`input[data-stat="${CSS.escape(focused)}"]`);
+      input?.focus();
+      try {
+        input?.setSelectionRange(caret, caret);
+      } catch {
+        // Les champs numériques ne gèrent pas toujours la position du curseur.
+      }
     }
     renderStatus(s);
   }
+
+  // ---------- Mise à jour automatique du personnage ----------
+  // Pas besoin de bouton : la fiche et le deck sont relus quand le joueur change de page,
+  // revient sur l'onglet, ou clique sur un bouton des pages Personnage / Deck / Inventaire.
+  let refreshTimer = null;
+  let refreshing = false;
+  const MIN_REFRESH_GAP = 3000; // même limite que DMX_CATALOG.refreshCharacter
+  function refreshCharacterSoon(delay) {
+    clearTimeout(refreshTimer);
+    // Pas plus d'une lecture toutes les 3 s : on attend juste le temps qu'il manque.
+    const sinceLast = Date.now() - DMX_CATALOG.get().characterAt;
+    delay = Math.max(delay, MIN_REFRESH_GAP - sinceLast + 50);
+    refreshTimer = setTimeout(async () => {
+      if (document.hidden || syncing) return;
+      if (refreshing) return refreshCharacterSoon(1000);
+      refreshing = true;
+      try {
+        const done = await DMX_CATALOG.refreshCharacter();
+        if (done) {
+          syncError = null;
+          render();
+        } else {
+          refreshCharacterSoon(0); // lecture trop récente : on réessaie dès que possible
+        }
+      } catch (err) {
+        syncError = err.message === "non connecté" ? "connecte-toi au jeu" : `erreur : ${err.message}`;
+        render();
+      } finally {
+        refreshing = false;
+      }
+    }, delay);
+  }
+
+  let lastUrl = location.href;
+  setInterval(() => {
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+    refreshCharacterSoon(800);
+  }, 700);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshCharacterSoon(300);
+  });
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (panel.contains(e.target) || launcher.contains(e.target)) return;
+      if (!e.target.closest?.("button, [role=button], a")) return;
+      if (/^\/(personnage|deck|inventaire)/.test(location.pathname)) refreshCharacterSoon(1500);
+    },
+    true
+  );
+
+  // Rafraîchit le « il y a … » de la barre d'état.
+  setInterval(() => {
+    if (settings.visible && !document.hidden) renderStatus(state());
+  }, 30000);
 
   function applyVisibility() {
     panel.style.display = settings.visible ? "" : "none";
@@ -670,6 +790,13 @@
       render();
       return;
     }
+    const doneKey = e.target.closest("[data-done]")?.dataset.done;
+    if (doneKey) {
+      settings.doneToday = { ...settings.doneToday, [doneKey]: today() };
+      save();
+      render();
+      return;
+    }
     const goTab = e.target.closest("[data-go-tab]")?.dataset.goTab;
     if (goTab) {
       settings.tab = goTab;
@@ -689,15 +816,7 @@
     if (!stat) return;
     settings.customPoints = { ...settings.customPoints, [stat]: e.target.value };
     save();
-    const caret = e.target.selectionStart;
     render();
-    const input = body.querySelector(`input[data-stat="${CSS.escape(stat)}"]`);
-    input?.focus();
-    try {
-      input?.setSelectionRange(caret, caret);
-    } catch {
-      // Les champs numériques ne gèrent pas toujours la position du curseur.
-    }
   });
 
   searchInput.addEventListener("input", () => {
