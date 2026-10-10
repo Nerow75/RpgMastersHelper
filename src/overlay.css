@@ -1,0 +1,93 @@
+#dmx-panel {
+  position: fixed;
+  top: 80px;
+  right: 16px;
+  z-index: 2147483647;
+  width: 300px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(28, 24, 18, 0.95);
+  color: #f2e6cf;
+  border: 1px solid #d68c28;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+#dmx-panel .dmx-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #d68c28;
+  color: #1c1812;
+  font-weight: 700;
+  cursor: move;
+  border-radius: 7px 7px 0 0;
+  user-select: none;
+}
+
+#dmx-panel .dmx-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+}
+
+#dmx-panel .dmx-controls {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(214, 140, 40, 0.4);
+}
+
+#dmx-panel .dmx-controls label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+#dmx-panel select {
+  margin-top: 2px;
+  padding: 3px;
+  background: #2e281f;
+  color: #f2e6cf;
+  border: 1px solid #6b5333;
+  border-radius: 4px;
+}
+
+#dmx-panel .dmx-body {
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+}
+
+#dmx-panel h4 {
+  margin: 10px 0 4px;
+  color: #f0a840;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#dmx-panel p,
+#dmx-panel ul {
+  margin: 0;
+}
+
+#dmx-panel ul {
+  padding-left: 18px;
+}
+
+#dmx-panel .dmx-deck {
+  margin-bottom: 6px;
+}
+
+#dmx-panel .dmx-empty {
+  opacity: 0.7;
+  font-style: italic;
+}
