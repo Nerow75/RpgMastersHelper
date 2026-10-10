@@ -1,23 +1,38 @@
 # Dofus Masters Helper
 
-Extension navigateur (Chrome / Edge / Brave, Manifest V3) qui affiche un panneau de
-recommandations par-dessus [Dofus Masters](https://rpgmasters.houk.fr/) :
+Extension navigateur (Chrome / Edge / Brave, Manifest V3) pour
+[Dofus Masters](https://rpgmasters.houk.fr/). Elle affiche un panneau de conseils par-dessus
+le jeu, calculés à partir des **vraies données du jeu**, relues automatiquement : si un objet,
+un monstre ou un sort change, l'extension le voit à la synchronisation suivante.
 
-- répartition des points de caractéristique
-- priorités d'équipement
-- points forts du build
-- decks de sorts conseillés
+L'extension ne fait que **lire** : elle ne clique, n'équipe et ne modifie rien dans le jeu.
 
-Tu choisis ta classe et ton élément dans le panneau ; ton choix est mémorisé.
+## Ce que fait le panneau
 
-L'extension lit aussi (sans rien modifier) la page **Ma collection** :
+- **Conseils**
+  - élément de ton build, détecté d'après ton équipement (ou choisi à la main) ;
+  - où mettre tes points libres, avec les vrais coûts par palier du jeu ;
+  - pour chaque emplacement : ce que tu portes, un meilleur objet que tu possèdes déjà,
+    et le meilleur objet à viser à ton niveau.
+- **Sorts** : passif de ta classe, sorts de dégâts de ton élément classés par dégâts/PA,
+  sorts de soutien, avec ceux que tu n'as pas encore.
+- **Bestiaire** : recherche d'un monstre (niveaux, zones, butin) ou d'un objet
+  (stats, monstres qui le lâchent).
 
-- ton niveau (« Équipables par moi (niv. 112 ou moins) ») ;
-- les objets affichés, obtenus ou non.
+## D'où viennent les données
 
-Elle en déduit ton meilleur équipement possédé par emplacement et les objets à viser
-à ton niveau. Les objets ne sont connus qu'une fois affichés : utilise le filtre
-« Niv. … à … » de la collection pour charger ceux de ton niveau.
+Le site (Next.js) envoie les données de chaque page en JSON dans le HTML. L'extension
+télécharge ces pages avec ta session (il faut être connecté) :
+
+| Page | Données | Rafraîchie |
+| --- | --- | --- |
+| `/bestiaire` | monstres, zones, butin | 1 fois par jour |
+| `/bestiaire?onglet=objets`, `/collection?onglet=objets` | objets et leurs stats | 1 fois par jour |
+| `/collection?onglet=sorts` | sorts | 1 fois par jour |
+| `/personnage` | équipement porté, caractéristiques, points libres, classes | toutes les 10 min |
+
+Le bouton **Mettre à jour** force une synchronisation complète. Ton niveau et tes objets
+obtenus sont aussi lus quand tu ouvres **Ma collection**.
 
 ## Installer (mode développeur)
 
@@ -26,38 +41,25 @@ Elle en déduit ton meilleur équipement possédé par emplacement et les objets
 3. Active **Mode développeur** (en haut à droite).
 4. Clique sur **Charger l'extension non empaquetée** et sélectionne le dossier du projet
    (celui qui contient `manifest.json`).
-5. Va sur https://rpgmasters.houk.fr/ : le panneau apparaît à droite.
-   Clique sur l'icône de l'extension pour l'afficher / le masquer. Tu peux le déplacer
-   en tirant son en-tête.
+5. Va sur https://rpgmasters.houk.fr/, connecte-toi : le panneau apparaît à droite.
+   Clique sur l'icône de l'extension pour l'afficher / le masquer, tire son en-tête pour
+   le déplacer.
 
-Après chaque modification des fichiers, clique sur ↻ (recharger) sur la carte de
-l'extension dans `chrome://extensions`, puis recharge la page du jeu.
+Après chaque mise à jour des fichiers, clique sur ↻ sur la carte de l'extension dans
+`chrome://extensions`, puis recharge la page du jeu.
 
 ## Structure
 
 | Fichier | Rôle |
 | --- | --- |
 | `manifest.json` | Déclaration de l'extension (nom, permissions, site ciblé) |
-| `src/game.js` | Lit les infos affichées par le jeu (niveau, objets) |
-| `data/builds.js` | **Toutes les recommandations** (classes, éléments, decks) |
-| `src/overlay.js` | Construit et affiche le panneau dans la page |
+| `src/game.js` | Lecture des pages du jeu (données Next.js, page Ma collection) |
+| `src/catalog.js` | Synchronisation et mise en cache des données du jeu |
+| `src/advisor.js` | Calcul des conseils (points, équipement, sorts) |
+| `src/overlay.js` | Panneau affiché dans la page |
 | `src/overlay.css` | Style du panneau |
-| `src/background.js` | Gère le clic sur l'icône de l'extension |
+| `src/background.js` | Clic sur l'icône de l'extension |
 
-## Ajouter des recommandations
-
-Tout se passe dans `data/builds.js`. Les textes actuels sont des exemples génériques
-inspirés de Dofus : remplace-les par les vraies règles de Dofus Masters. Pour un deck :
-
-```js
-iop: {
-  label: "Iop",
-  role: "Dégâts au corps à corps",
-  elements: ["terre", "feu", "air", "eau"],
-  decks: {
-    terre: [
-      { name: "Burst mono-cible", spells: ["Sort A", "Sort B"], tip: "Ouvre avec le buff." },
-    ],
-  },
-},
-```
+Le « score » d'un objet est une estimation : chaque stat a un poids dans `WEIGHTS`
+(`src/advisor.js`), par exemple 1 PA = 100 points de stat principale. Ajuste ces poids si
+les conseils ne te semblent pas justes.

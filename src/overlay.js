@@ -1,22 +1,18 @@
-// Panneau de recommandations injecté par-dessus la page du jeu.
-// Il ne lit ni ne modifie rien dans le jeu : il affiche seulement des conseils
-// à partir de la classe et de l'élément choisis par le joueur (données dans data/builds.js).
+// Panneau injecté par-dessus la page du jeu. Il lit les données du jeu (catalog.js, game.js),
+// calcule des conseils (advisor.js) et les affiche. Il ne modifie jamais rien dans le jeu.
 (() => {
   if (window.__dmxLoaded) return;
   window.__dmxLoaded = true;
 
-  const data = DMX_DATA;
-  const STORAGE_KEY = "dmx-settings";
+  const { ELEMENTS } = DMX_ADVISOR;
+  const STORAGE_KEY = "dmx-settings-v2";
   const PROFILE_KEY = "dmx-profile";
-  let settings = { classKey: "iop", elementKey: "terre", visible: true };
-  // Ce que l'extension a lu dans le jeu : niveau + objets vus sur la page "Ma collection".
+  // classId / elementKey à null = détection automatique.
+  let settings = { classId: null, elementKey: null, tab: "conseils", visible: true };
+  // Lu sur la page "Ma collection" : niveau + objets affichés (obtenus ou non), par nom.
   let profile = { level: null, items: {} };
-
-  // Ordre d'affichage des emplacements ; combien d'objets recommander pour chacun.
-  const SLOTS = [
-    ["Arme", 1], ["Bouclier", 1], ["Chapeau", 1], ["Cape", 1], ["Amulette", 1],
-    ["Anneau", 2], ["Ceinture", 1], ["Bottes", 1], ["Familier", 1], ["Dofus / Trophée", 6],
-  ];
+  let syncError = null;
+  let syncing = false;
 
   const panel = document.createElement("div");
   panel.id = "dmx-panel";
@@ -29,114 +25,254 @@
       <label>Classe <select class="dmx-class"></select></label>
       <label>Élément <select class="dmx-element"></select></label>
     </div>
+    <nav class="dmx-tabs">
+      <button data-tab="conseils">Conseils</button>
+      <button data-tab="sorts">Sorts</button>
+      <button data-tab="bestiaire">Bestiaire</button>
+    </nav>
+    <div class="dmx-search" hidden>
+      <input type="search" placeholder="Monstre ou objet…" aria-label="Rechercher dans le bestiaire">
+    </div>
     <div class="dmx-body"></div>
     <div class="dmx-footer">
-      <button class="dmx-export">Exporter un échantillon des données du jeu</button>
+      <span class="dmx-sync-status"></span>
+      <button class="dmx-sync">Mettre à jour</button>
+      <button class="dmx-export" title="Pour aider au développement de l'extension">Exporter</button>
       <textarea class="dmx-export-out" readonly hidden></textarea>
     </div>
   `;
 
-  const classSelect = panel.querySelector(".dmx-class");
-  const elementSelect = panel.querySelector(".dmx-element");
-  const body = panel.querySelector(".dmx-body");
-
-  for (const [key, cls] of Object.entries(data.classes)) {
-    classSelect.add(new Option(cls.label, key));
-  }
+  const $ = (sel) => panel.querySelector(sel);
+  const classSelect = $(".dmx-class");
+  const elementSelect = $(".dmx-element");
+  const searchBox = $(".dmx-search");
+  const searchInput = $(".dmx-search input");
+  const body = $(".dmx-body");
 
   function escapeHtml(text) {
     const div = document.createElement("div");
-    div.textContent = text;
+    div.textContent = String(text);
     return div.innerHTML;
   }
 
-  function list(items) {
-    return `<ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
-  }
+  const normalize = (s) =>
+    s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-  function fillElements() {
-    const cls = data.classes[settings.classKey];
-    elementSelect.innerHTML = "";
-    for (const key of cls.elements) {
-      elementSelect.add(new Option(data.elements[key].label, key));
-    }
-    if (!cls.elements.includes(settings.elementKey)) settings.elementKey = cls.elements[0];
-    elementSelect.value = settings.elementKey;
-  }
+  // Tout ce qui se déduit des données lues : niveau, élément, classe, objets possédés...
+  function state() {
+    const cat = DMX_CATALOG.get();
+    const character = cat.character;
+    const equipped = (character?.slots || []).map((s) => s.item).filter(Boolean);
+    const detectedElement = DMX_ADVISOR.detectElement(equipped);
 
-  // Pour chaque emplacement : les meilleurs objets (niveau le plus haut) équipables à ton niveau.
-  function bestBySlot(owned) {
-    const items = Object.values(profile.items).filter(
-      (i) => i.owned === owned && (profile.level == null || i.level <= profile.level)
+    let ownedIds = null;
+    const ownedNames = new Set(
+      Object.values(profile.items).filter((i) => i.owned).map((i) => i.name)
     );
-    const rows = [];
-    for (const [slot, count] of SLOTS) {
-      const best = items
-        .filter((i) => i.type === slot)
-        .sort((a, b) => b.level - a.level)
-        .slice(0, count);
-      if (best.length) rows.push([slot, best]);
+    if (cat.ownedItemIds.length || ownedNames.size) {
+      ownedIds = new Set(cat.ownedItemIds);
+      for (const item of Object.values(cat.items)) if (ownedNames.has(item.n)) ownedIds.add(item.id);
+      for (const item of equipped) ownedIds.add(item.id);
     }
-    return rows;
+
+    return {
+      cat,
+      character,
+      level: profile.level,
+      items: Object.values(cat.items),
+      detectedElement,
+      elementKey: settings.elementKey || detectedElement || "terre",
+      classId: settings.classId ?? character?.breed ?? null,
+      ownedIds,
+      ownedCardIds: cat.ownedCardIds.length ? new Set(cat.ownedCardIds) : null,
+    };
   }
 
-  function slotTable(rows) {
-    return `<table class="dmx-slots">${rows
-      .map(
-        ([slot, items]) =>
-          `<tr><th>${escapeHtml(slot)}</th><td>${items
-            .map((i) => `${escapeHtml(i.name)} <span class="dmx-dim">niv. ${i.level}</span>`)
-            .join("<br>")}</td></tr>`
-      )
-      .join("")}</table>`;
+  function fillSelects(s) {
+    const classes = s.cat.classes;
+    classSelect.innerHTML = "";
+    classSelect.add(new Option(classes.length ? "— choisis —" : "(synchronise)", ""));
+    for (const cls of classes) classSelect.add(new Option(cls.n, cls.id));
+    classSelect.value = s.classId ?? "";
+
+    elementSelect.innerHTML = "";
+    const auto = s.detectedElement ? `Auto (${ELEMENTS[s.detectedElement].label})` : "Auto";
+    elementSelect.add(new Option(auto, ""));
+    for (const [key, el] of Object.entries(ELEMENTS)) elementSelect.add(new Option(el.label, key));
+    elementSelect.value = settings.elementKey || "";
   }
 
-  function renderProfile() {
-    const known = Object.keys(profile.items).length;
-    const level = profile.level != null ? `Niveau <strong>${profile.level}</strong>` : "Niveau inconnu";
-    if (!known) {
-      return `<section><h4>Ton personnage</h4><p>${level}</p>
-        <p class="dmx-empty">Ouvre « Ma collection » pour que l'extension lise ton niveau et tes objets.</p></section>`;
+  // ---------- Onglet Conseils ----------
+
+  function renderPoints(s) {
+    const c = s.character;
+    if (!c || !c.rows.length || c.pointsFree == null) {
+      return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
     }
-    const mine = bestBySlot(true);
-    const targets = bestBySlot(false);
+    const el = ELEMENTS[s.elementKey];
+    if (c.pointsFree === 0) return `<p>Aucun point libre : tout est déjà placé.</p>`;
+    const advice = DMX_ADVISOR.pointsAdvice(c.rows, c.pointsFree, s.elementKey);
+    let html = `<p>Tu as <strong>${c.pointsFree}</strong> points libres.</p>`;
+    if (advice.main) {
+      const m = advice.main;
+      html += `<p>➜ Mets-les en <strong>${el.statLabel}</strong> : <strong>+${m.gain}</strong>
+        (base ${m.row.base} → ${m.newBase})${m.left ? `, il en restera ${m.left}` : ""}.</p>`;
+    }
+    if (advice.vitalite) {
+      html += `<p class="dmx-dim">En Vitalité, ce serait +${advice.vitalite.gain} PV.</p>`;
+    }
+    for (const row of advice.wasted) {
+      html += `<p class="dmx-dim">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
+        build ${el.label}.</p>`;
+    }
+    return html;
+  }
+
+  function itemLine({ item, score }) {
+    return `${escapeHtml(item.n)} <span class="dmx-dim">niv. ${item.lvl} · ${score} pts</span>`;
+  }
+
+  function renderGear(s) {
+    if (!s.character?.slots.length) return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
+    const rows = DMX_ADVISOR.gearAdvice({
+      items: s.items,
+      slots: s.character.slots,
+      ownedIds: s.ownedIds,
+      level: s.level,
+      elementKey: s.elementKey,
+    });
+    const html = rows
+      .map((r) => {
+        const worn = r.worn.length ? r.worn.map(itemLine).join("<br>") : `<span class="dmx-dim">vide</span>`;
+        const owned = r.owned.length
+          ? `<div class="dmx-up">✔ Tu as mieux : ${r.owned.map(itemLine).join(", ")}</div>`
+          : "";
+        const target = r.target.length
+          ? `<div class="dmx-target">★ À viser : ${r.target.slice(0, 2).map(itemLine).join(", ")}</div>`
+          : "";
+        return `<tr><th>${escapeHtml(r.label)}</th><td>${worn}${owned}${target}</td></tr>`;
+      })
+      .join("");
+    const notes = [];
+    if (s.level == null) notes.push("niveau inconnu : ouvre « Ma collection » pour le lire");
+    if (!s.ownedIds) notes.push("objets possédés inconnus : ouvre « Ma collection »");
+    return `<table class="dmx-slots">${html}</table>
+      <p class="dmx-dim">Score = valeur estimée des stats pour un build ${ELEMENTS[s.elementKey].label}.
+      ${notes.length ? `<br>⚠ ${notes.join(" ; ")}.` : ""}</p>`;
+  }
+
+  function renderAdvice(s) {
+    const el = ELEMENTS[s.elementKey];
+    const how = settings.elementKey ? "choisi" : s.detectedElement ? "détecté d'après ton équipement" : "par défaut";
     return `
-      <section><h4>Ton personnage</h4><p>${level} · ${known} objets lus</p></section>
-      <section><h4>Ton meilleur équipement possédé</h4>
-        ${mine.length ? slotTable(mine) : `<p class="dmx-empty">Aucun objet obtenu repéré.</p>`}</section>
-      <section><h4>Objets à viser</h4>
-        ${targets.length ? slotTable(targets) : `<p class="dmx-empty">Rien à signaler.</p>`}
-        <p class="dmx-dim">Seuls les objets déjà affichés sont connus : dans « Ma collection », clique sur
-        le filtre « Niv. … à ${profile.level ?? "…"} » pour voir ceux de ton niveau.</p></section>
-    `;
+      <section><h4>Ton personnage</h4>
+        <p>${s.level != null ? `Niveau <strong>${s.level}</strong>` : "Niveau inconnu"} ·
+        Élément <strong>${el.label}</strong> <span class="dmx-dim">(${how})</span></p></section>
+      <section><h4>Points de caractéristique</h4>${renderPoints(s)}</section>
+      <section><h4>Équipement</h4>${renderGear(s)}</section>`;
+  }
+
+  // ---------- Onglet Sorts ----------
+
+  function cardLine({ card, owned, perAp }) {
+    const tag = owned === false ? ` <span class="dmx-tag">non obtenu</span>` : "";
+    const dmg = perAp != null ? ` · ~${Math.round(perAp)} dégâts/PA` : "";
+    return `<li title="${escapeHtml(card.d || "")}"><strong>${escapeHtml(card.n)}</strong>
+      <span class="dmx-dim">${card.ap} PA${dmg} · niv. ${card.lvl}</span>${tag}</li>`;
+  }
+
+  function renderSpells(s) {
+    if (s.classId == null) return `<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
+    const cls = s.cat.classes.find((c) => c.id === s.classId);
+    const { damage, support } = DMX_ADVISOR.spellAdvice({
+      cards: Object.values(s.cat.cards),
+      classId: s.classId,
+      level: s.level,
+      elementKey: s.elementKey,
+      ownedCardIds: s.ownedCardIds,
+    });
+    const el = ELEMENTS[s.elementKey];
+    return `
+      ${cls ? `<section><h4>${escapeHtml(cls.n)} · ${escapeHtml(cls.role || "")}</h4>
+        ${cls.passive ? `<p><strong>${escapeHtml(cls.passive.name)}</strong> : ${escapeHtml(cls.passive.desc)}</p>` : ""}
+        </section>` : ""}
+      <section><h4>Dégâts ${el.label} (les plus rentables par PA)</h4>
+        ${damage.length ? `<ul>${damage.slice(0, 8).map(cardLine).join("")}</ul>`
+          : `<p class="dmx-empty">Aucun sort de dégâts ${el.label} connu pour cette classe.</p>`}</section>
+      <section><h4>Soutien (boucliers, soins, buffs)</h4>
+        ${support.length ? `<ul>${support.slice(0, 5).map(cardLine).join("")}</ul>`
+          : `<p class="dmx-empty">Aucun.</p>`}</section>
+      <p class="dmx-dim">Survole un sort pour lire sa description.</p>`;
+  }
+
+  // ---------- Onglet Bestiaire ----------
+
+  function statsText(st = {}) {
+    return Object.entries(st).map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(", ");
+  }
+
+  function renderBestiary(s) {
+    const q = normalize(searchInput.value.trim());
+    if (!s.cat.monsters.length) return `<p class="dmx-empty">Bestiaire pas encore synchronisé.</p>`;
+    if (q.length < 2) {
+      return `<p class="dmx-dim">${s.cat.monsters.length} monstres et ${s.items.length} objets connus.
+        Tape au moins 2 lettres.</p>`;
+    }
+    const zoneName = (id) => {
+      const z = s.cat.zones[id];
+      return z ? `${z.n} (${z.area})` : `zone ${id}`;
+    };
+    const monsters = s.cat.monsters.filter((m) => normalize(m.n).includes(q)).slice(0, 6);
+    const items = s.items.filter((i) => normalize(i.n).includes(q)).slice(0, 6);
+    const monsterHtml = monsters
+      .map((m) => {
+        const drops = (m.d || [])
+          .map(([id, min]) => `${escapeHtml(s.cat.items[id]?.n || `objet ${id}`)} (${min} %)`)
+          .join(", ");
+        return `<li><strong>${escapeHtml(m.n)}</strong> <span class="dmx-dim">niv. ${m.lo}–${m.hi} ·
+          ${escapeHtml(m.race)}</span><br>Zones : ${(m.z || []).map((id) => escapeHtml(zoneName(id))).join(", ") || "?"}
+          ${drops ? `<br>Butin : ${drops}` : ""}</li>`;
+      })
+      .join("");
+    const itemHtml = items
+      .map((i) => {
+        const droppers = s.cat.monsters.filter((m) => (m.d || []).some(([id]) => id === i.id));
+        return `<li><strong>${escapeHtml(i.n)}</strong> <span class="dmx-dim">${escapeHtml(i.s || "")} ·
+          niv. ${i.lvl}</span><br>${escapeHtml(statsText(i.st))}
+          ${droppers.length ? `<br>Lâché par : ${droppers.slice(0, 5).map((m) => escapeHtml(m.n)).join(", ")}` : ""}</li>`;
+      })
+      .join("");
+    return `
+      <section><h4>Monstres</h4>${monsterHtml ? `<ul>${monsterHtml}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>
+      <section><h4>Objets</h4>${itemHtml ? `<ul>${itemHtml}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>`;
+  }
+
+  // ---------- Rendu général ----------
+
+  function renderStatus(s) {
+    const status = $(".dmx-sync-status");
+    if (syncing) status.textContent = "Synchronisation…";
+    else if (syncError) status.textContent = `⚠ ${syncError}`;
+    else if (s.cat.syncedAt) {
+      const minutes = Math.round((Date.now() - s.cat.syncedAt) / 60000);
+      status.textContent = `${s.items.length} objets · ${Object.keys(s.cat.cards).length} sorts · ${
+        minutes < 60 ? `il y a ${minutes} min` : `il y a ${Math.round(minutes / 60)} h`
+      }`;
+    } else status.textContent = "Pas encore synchronisé";
+    $(".dmx-sync").disabled = syncing;
   }
 
   function render() {
-    const cls = data.classes[settings.classKey];
-    const el = data.elements[settings.elementKey];
-    const decks = cls.decks[settings.elementKey] || [];
-    const decksHtml = decks.length
-      ? decks
-          .map(
-            (d) => `
-          <div class="dmx-deck">
-            <strong>${escapeHtml(d.name)}</strong>
-            ${list(d.spells)}
-            ${d.tip ? `<em>${escapeHtml(d.tip)}</em>` : ""}
-          </div>`
-          )
-          .join("")
-      : `<p class="dmx-empty">Aucun deck renseigné pour ${escapeHtml(cls.label)} ${escapeHtml(el.label)}.
-         Ajoute-le dans <code>data/builds.js</code>.</p>`;
-
-    body.innerHTML = `
-      ${renderProfile()}
-      <section><h4>Rôle</h4><p>${escapeHtml(cls.role)}</p></section>
-      <section><h4>Points de caractéristique</h4>${list(el.points)}</section>
-      <section><h4>Équipement</h4>${list(el.gear)}</section>
-      <section><h4>Points forts du build</h4>${list(el.strengths)}</section>
-      <section><h4>Decks de sorts</h4>${decksHtml}</section>
-    `;
+    const s = state();
+    fillSelects(s);
+    for (const b of panel.querySelectorAll(".dmx-tabs button")) {
+      b.classList.toggle("active", b.dataset.tab === settings.tab);
+    }
+    searchBox.hidden = settings.tab !== "bestiaire";
+    if (settings.tab === "sorts") body.innerHTML = renderSpells(s);
+    else if (settings.tab === "bestiaire") body.innerHTML = renderBestiary(s);
+    else body.innerHTML = renderAdvice(s);
+    renderStatus(s);
   }
 
   function applyVisibility() {
@@ -147,48 +283,66 @@
     chrome.storage.local.set({ [STORAGE_KEY]: settings });
   }
 
-  classSelect.addEventListener("change", () => {
-    settings.classKey = classSelect.value;
-    fillElements();
+  async function sync(force) {
+    syncing = true;
+    syncError = null;
     render();
+    try {
+      await DMX_CATALOG.refresh({ force });
+    } catch (err) {
+      syncError = err.message === "non connecté" ? "connecte-toi au jeu" : `erreur : ${err.message}`;
+    }
+    syncing = false;
+    render();
+  }
+
+  // ---------- Événements ----------
+
+  classSelect.addEventListener("change", () => {
+    settings.classId = classSelect.value === "" ? null : Number(classSelect.value);
     save();
+    render();
   });
 
   elementSelect.addEventListener("change", () => {
-    settings.elementKey = elementSelect.value;
+    settings.elementKey = elementSelect.value || null;
+    save();
     render();
+  });
+
+  for (const b of panel.querySelectorAll(".dmx-tabs button")) {
+    b.addEventListener("click", () => {
+      settings.tab = b.dataset.tab;
+      save();
+      render();
+      if (settings.tab === "bestiaire") searchInput.focus();
+    });
+  }
+
+  searchInput.addEventListener("input", () => {
+    body.innerHTML = renderBestiary(state());
+  });
+
+  $(".dmx-sync").addEventListener("click", () => sync(true));
+
+  $(".dmx-close").addEventListener("click", () => {
+    settings.visible = false;
+    applyVisibility();
     save();
   });
 
-  // Pages dont on veut connaître la forme des données.
-  const EXPORT_PAGES = [
-    "/bestiaire",
-    "/bestiaire?onglet=objets",
-    "/bestiaire?onglet=boss",
-    "/collection?onglet=sorts",
-    "/personnage",
-  ];
-  const SAMPLE_SIZE = 3;
-  const MAX_SAMPLE_CHARS = 3000;
-  // Champs (hors listes nommées) utiles pour les recommandations : caractéristiques,
-  // équipement porté, presets, classes, filtres du bestiaire...
-  const EXPORT_FIELDS = [
-    "rows", "pointsFree", "equipped", "slots", "presets", "classes",
-    "zones", "statOptions", "typeCounts", "butin", "lache",
-  ];
+  // Export d'un échantillon des données de chaque page, pour faire évoluer l'extension.
+  const EXPORT_PAGES = ["/bestiaire", "/bestiaire?onglet=objets", "/collection?onglet=sorts", "/personnage"];
+  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "presets", "classes", "zones", "breed"];
+  const truncate = (value) => {
+    const json = JSON.stringify(Array.isArray(value) ? value.slice(0, 3) : value);
+    return json.length > 3000 ? json.slice(0, 3000) + "…" : JSON.parse(json);
+  };
 
-  function truncate(value) {
-    const json = JSON.stringify(Array.isArray(value) ? value.slice(0, SAMPLE_SIZE) : value);
-    return json.length > MAX_SAMPLE_CHARS ? json.slice(0, MAX_SAMPLE_CHARS) + "…" : JSON.parse(json);
-  }
-
-  // Récupère quelques exemples de chaque type de donnée trouvé sur ces pages,
-  // pour pouvoir écrire ensuite un lecteur adapté à leur format.
-  panel.querySelector(".dmx-export").addEventListener("click", async (e) => {
+  $(".dmx-export").addEventListener("click", async (e) => {
     const button = e.currentTarget;
-    const out = panel.querySelector(".dmx-export-out");
+    const out = $(".dmx-export-out");
     button.disabled = true;
-    button.textContent = "Récupération…";
     const report = {};
     for (const url of EXPORT_PAGES) {
       try {
@@ -211,22 +365,15 @@
     out.select();
     try {
       await navigator.clipboard.writeText(out.value);
-      button.textContent = "Copié ! Colle-le à Claude";
+      button.textContent = "Copié !";
     } catch {
-      button.textContent = "Copie le texte ci-dessous (Ctrl+C)";
+      button.textContent = "Copie (Ctrl+C)";
     }
     button.disabled = false;
   });
 
-  panel.querySelector(".dmx-close").addEventListener("click", () => {
-    settings.visible = false;
-    applyVisibility();
-    save();
-  });
-
   // Déplacement du panneau en le tirant par son en-tête.
-  const header = panel.querySelector(".dmx-header");
-  header.addEventListener("mousedown", (e) => {
+  $(".dmx-header").addEventListener("mousedown", (e) => {
     if (e.target.closest("button")) return;
     const rect = panel.getBoundingClientRect();
     const dx = e.clientX - rect.left;
@@ -251,7 +398,7 @@
     save();
   });
 
-  // Relit la page et met à jour le profil si quelque chose a changé.
+  // Relit la page "Ma collection" (niveau, objets obtenus) quand elle change.
   function scan() {
     let changed = false;
     const level = DMX_GAME.readLevel(document);
@@ -281,15 +428,15 @@
     scanTimer = setTimeout(scan, 300);
   }).observe(document.body, { childList: true, subtree: true });
 
-  chrome.storage.local.get([STORAGE_KEY, PROFILE_KEY], (stored) => {
-    const saved = stored[STORAGE_KEY];
-    if (saved && data.classes[saved.classKey]) settings = { ...settings, ...saved };
+  (async () => {
+    const stored = await chrome.storage.local.get([STORAGE_KEY, PROFILE_KEY]);
+    settings = { ...settings, ...stored[STORAGE_KEY] };
     if (stored[PROFILE_KEY]) profile = { ...profile, ...stored[PROFILE_KEY] };
-    classSelect.value = settings.classKey;
-    fillElements();
+    await DMX_CATALOG.load();
     render();
     applyVisibility();
     document.body.appendChild(panel);
     scan();
-  });
+    sync(false);
+  })();
 })();

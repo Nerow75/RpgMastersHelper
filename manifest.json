@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dofus Masters Helper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Recommandations de caractéristiques, d'équipement et de decks de sorts pour Dofus Masters.",
   "permissions": [
     "storage"
@@ -28,8 +28,9 @@
         "https://rpgmasters.houk.fr/*"
       ],
       "js": [
-        "data/builds.js",
         "src/game.js",
+        "src/advisor.js",
+        "src/catalog.js",
         "src/overlay.js"
       ],
       "css": [
