@@ -17,6 +17,7 @@ var DMX_CATALOG = (() => {
     spells: "/collection?onglet=sorts",
     character: "/personnage",
     deck: "/deck",
+    inventory: "/inventaire",
   };
 
   const empty = () => ({
@@ -71,15 +72,14 @@ var DMX_CATALOG = (() => {
 
   async function syncCharacter() {
     const values = await DMX_GAME.fetchPageData(PAGES.character);
-    const fields = DMX_GAME.findFields(values, ["slots", "rows", "pointsFree", "inventory", "prestige", "choices"]);
+    // (le champ `inventory` de cette page n'est qu'un compteur : l'inventaire vient de /inventaire)
+    const fields = DMX_GAME.findFields(values, ["slots", "rows", "pointsFree", "prestige", "choices"]);
     // Menu profil de la barre de navigation : { name, level, kamas, energy, ... }.
     const profile = DMX_GAME.findObject(values, ["level", "kamas"]);
     // Bloc de changement de classe : { classes, current, cost, ... } -> classe actuelle.
     const classBlock = DMX_GAME.findObject(values, ["classes", "current"]);
     const current = classBlock?.current;
 
-    const inventory = readInventory(fields.inventory);
-    addItems(inventory.items);
 
     catalog.character = {
       slots: Array.isArray(fields.slots) ? fields.slots : [],
@@ -91,7 +91,6 @@ var DMX_CATALOG = (() => {
       energy: readEnergy(profile?.energy),
       prestige: typeof fields.prestige === "number" ? fields.prestige : null,
       classId: typeof current === "number" ? current : current?.id ?? null,
-      inventoryIds: inventory.ids,
       // Codes d'équipement proposés par le site (« Équipement à partager ») : { key, label, count, code }.
       gearCodes: Array.isArray(fields.choices)
         ? fields.choices.filter((c) => typeof c?.code === "string").map(({ key, label, count, code }) => ({ key, label, count, code }))
@@ -104,31 +103,47 @@ var DMX_CATALOG = (() => {
     }
     addItems(catalog.character.slots.map((s) => s.item).filter(Boolean));
     catalog.character.deck = await syncDeck();
+    Object.assign(catalog.character, await syncInventory());
     // La page Deck donne la classe de façon sûre (breedId) ; sinon, celle de la fiche.
     catalog.character.classId = catalog.character.deck?.classId ?? catalog.character.classId;
     catalog.characterAt = Date.now();
   }
 
-  // Inventaire : selon la page, une entrée peut être l'objet complet, { item, qty, fusion },
-  // ou seulement un identifiant ({ itemId }, { id, qty } ou un nombre). On accepte tout cela.
-  function readInventory(inventory) {
-    const ids = new Set();
-    const items = [];
-    const visit = (v) => {
-      if (typeof v === "number") return ids.add(v);
-      if (Array.isArray(v)) return v.forEach(visit);
-      if (!v || typeof v !== "object") return;
-      if (DMX_GAME.findRecords(v)[""]?.size) {
-        // L'entrée est elle-même un objet du jeu.
-        items.push(v);
-        return ids.add(v.id);
+  // Page Inventaire : props du composant InventoryView { entries, slots, sets, ... }.
+  // entries = [{ item, fusion, qty, locked }] (objets portés non compris) ;
+  // sets = panoplies [{ id, n, pieces: [objets], bonuses: [{ pieces, stats }] }].
+  async function syncInventory() {
+    try {
+      const values = await DMX_GAME.fetchPageData(PAGES.inventory);
+      const props = DMX_GAME.findObject(values, ["entries", "sets"]) ?? DMX_GAME.findObject(values, ["entries"]);
+      if (!props || !Array.isArray(props.entries)) return { inventory: null, sets: [] };
+      const inventory = [];
+      for (const entry of props.entries) {
+        const item = entry?.item;
+        if (item?.id == null) continue;
+        catalog.items[item.id] = item;
+        inventory.push({
+          id: item.id,
+          fusion: Number(entry.fusion) || 0,
+          qty: Number(entry.qty) || 1,
+          locked: !!entry.locked,
+        });
       }
-      if (v.item && typeof v.item === "object") return visit(v.item);
-      const id = v.itemId ?? v.item_id ?? v.item ?? v.id;
-      if (Number.isInteger(id)) ids.add(id);
-    };
-    visit(inventory ?? []);
-    return { ids: [...ids], items };
+      const sets = (Array.isArray(props.sets) ? props.sets : []).map((set) => {
+        const pieces = (set.pieces || []).map((p) => (typeof p === "number" ? p : p?.id)).filter(Number.isInteger);
+        for (const p of set.pieces || []) if (p?.id != null && p.n) catalog.items[p.id] ??= p;
+        return {
+          id: set.id,
+          n: set.n,
+          pieces,
+          bonuses: (set.bonuses || []).map((b) => ({ pieces: b.pieces, stats: b.stats || b.st || {} })),
+        };
+      });
+      return { inventory, sets };
+    } catch (err) {
+      if (err.message === "non connecté") throw err;
+      return { inventory: null, sets: [] }; // page Inventaire illisible : on garde le reste
+    }
   }
 
   // Énergie du menu profil : { value, max, nextAt, periodSec }. `nextAt` = moment du prochain

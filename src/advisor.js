@@ -21,18 +21,49 @@ var DMX_ADVISOR = (() => {
     resNeutre: 1, resTerre: 1, resFeu: 1, resEau: 1, resAir: 1, resCritiques: 1, resPoussee: 0.5,
   };
 
-  function itemScore(item, elementKey) {
+  // Fusion (règles du jeu) : 3 copies identiques pour monter d'un niveau ; chaque niveau
+  // augmente les stats de l'objet de ce pourcentage, sauf PA, PM, PO et invocations.
+  const FUSION = { copies: 3, bonusPct: [0, 10, 20, 25, 30, 35, 40, 45], excluded: ["pa", "pm", "po", "invocations"], max: 7, dofusMax: 4 };
+
+  function fusedStats(item, fusion = 0) {
+    const pct = FUSION.bonusPct[fusion] || 0;
+    if (!pct) return item.st || {};
+    const st = {};
+    for (const [k, v] of Object.entries(item.st || {})) {
+      st[k] = FUSION.excluded.includes(k) ? v : Math.round(v * (1 + pct / 100));
+    }
+    return st;
+  }
+
+  function statsScore(st, elementKey) {
     const el = ELEMENTS[elementKey];
-    const st = item.st || {};
     let score = 0;
-    for (const [key, value] of Object.entries(st)) {
+    for (const [key, value] of Object.entries(st || {})) {
       if (key === el.stat) score += value;
       else if (key === el.dmg) score += value * 5;
       else score += value * (WEIGHTS[key] || 0);
     }
+    return score;
+  }
+
+  function itemScore(item, elementKey, fusion = 0) {
+    let score = statsScore(fusedStats(item, fusion), elementKey);
     // Armes : dégâts moyens des lignes dans l'élément.
     for (const line of item.w?.lines || []) {
-      if (line.el === el.code) score += ((line.min + line.max) / 2) * 2;
+      if (line.el === ELEMENTS[elementKey].code) score += ((line.min + line.max) / 2) * 2;
+    }
+    return Math.round(score);
+  }
+
+  // Bonus de panoplie actifs pour une liste d'objets portés : pour chaque panoplie, le palier
+  // le plus haut atteint (nombre de pièces différentes portées).
+  function setBonusScore(sets, wornIds, elementKey) {
+    const worn = new Set(wornIds);
+    let score = 0;
+    for (const set of sets) {
+      const count = set.pieces.filter((id) => worn.has(id)).length;
+      const active = set.bonuses.filter((b) => b.pieces <= count).sort((a, b) => b.pieces - a.pieces)[0];
+      if (active) score += statsScore(active.stats, elementKey);
     }
     return Math.round(score);
   }
@@ -142,46 +173,120 @@ var DMX_ADVISOR = (() => {
     return { alloc, left, wasted };
   }
 
-  // Objets possédés qui feraient mieux que ce qui est porté, emplacement par emplacement.
-  // Retourne une liste de { label, from (objet remplacé ou null si vide), to, gain }.
-  function gearUpgrades({ items, slots, ownedIds, level, elementKey }) {
-    const groups = new Map();
-    for (const s of slots) {
-      // Emplacements numérotés (anneau1, anneau2...) : même type d'objet.
-      const type = s.item?.s || s.slot.replace(/\d+$/, "");
-      if (!groups.has(type)) groups.set(type, { label: s.label, worn: [], count: 0 });
-      const g = groups.get(type);
-      g.count += 1;
-      if (s.item) g.worn.push(s.item);
-    }
-    const score = (item) => itemScore(item, elementKey);
+  // Type d'objet d'un emplacement (anneau1, anneau2... -> anneau).
+  const slotType = (slot) => slot.item?.s || slot.slot.replace(/\d+$/, "");
+
+  // Objets de l'inventaire qui feraient mieux que ce qui est porté, bonus de panoplie compris.
+  // `slots` = emplacements de la fiche ({ slot, label, item, fusion }), dans l'ordre du jeu.
+  // Retourne [{ label, slotIndex, from: { item, fusion } | null, to: { item, fusion }, gain }].
+  function gearUpgrades({ slots, inventory, itemsById, sets = [], level, elementKey }) {
+    if (!inventory) return [];
+    const score = (x) => (x ? itemScore(x.item, elementKey, x.fusion) : 0);
+    // Équipement de travail : on applique les améliorations au fur et à mesure.
+    const current = slots.map((s) => (s.item ? { item: s.item, fusion: s.fusion || 0 } : null));
+    const stock = inventory
+      .filter((e) => itemsById[e.id] && (level == null || itemsById[e.id].lvl <= level))
+      .map((e) => ({ item: itemsById[e.id], fusion: e.fusion, left: e.qty }));
+    const wornIds = () => current.filter(Boolean).map((x) => x.item.id);
     const upgrades = [];
-    for (const [type, g] of groups) {
-      const wornIds = new Set(g.worn.map((i) => i.id));
-      const candidates = items
-        .filter((i) => i.s === type && ownedIds.has(i.id) && !wornIds.has(i.id))
-        .filter((i) => level == null || i.lvl <= level)
-        .map((i) => ({ item: i, score: score(i) }))
-        .filter((c) => c.score > 0)
-        .sort((a, b) => b.score - a.score);
-      // Emplacements vides d'abord, puis les objets portés du plus faible au plus fort.
-      const places = [
-        ...Array(g.count - g.worn.length).fill(null),
-        ...g.worn.map((i) => ({ item: i, score: score(i) })).sort((a, b) => a.score - b.score),
-      ];
-      for (const place of places) {
-        const best = candidates[0];
-        if (!best || (place && best.score <= place.score)) break;
-        candidates.shift();
-        upgrades.push({
-          label: g.label || type,
-          from: place?.item || null,
-          to: best.item,
-          gain: best.score - (place?.score || 0),
-        });
+
+    // Emplacements vides d'abord, puis les objets portés du moins bon au meilleur.
+    const order = slots
+      .map((s, index) => ({ index, type: slotType(s), label: s.label || slotType(s) }))
+      .sort((a, b) => (current[a.index] ? 1 : 0) - (current[b.index] ? 1 : 0) || score(current[a.index]) - score(current[b.index]));
+
+    for (const place of order) {
+      const before = current[place.index];
+      const baseSets = setBonusScore(sets, wornIds(), elementKey);
+      let best = null;
+      for (const cand of stock) {
+        if (cand.left < 1 || cand.item.s !== place.type) continue;
+        // Un même objet ne se porte qu'une fois (deux anneaux identiques : non).
+        if (current.some((x, i) => x && i !== place.index && x.item.id === cand.item.id)) continue;
+        current[place.index] = cand;
+        const gain = score(cand) - score(before) + setBonusScore(sets, wornIds(), elementKey) - baseSets;
+        current[place.index] = before;
+        if (gain > 0 && (!best || gain > best.gain)) best = { cand, gain };
       }
+      if (!best) continue;
+      current[place.index] = best.cand;
+      best.cand.left -= 1;
+      if (before) stock.push({ ...before, left: 1 }); // l'objet retiré retourne dans l'inventaire
+      upgrades.push({
+        label: place.label,
+        slotIndex: place.index,
+        from: before,
+        to: { item: best.cand.item, fusion: best.cand.fusion },
+        gain: Math.round(best.gain),
+      });
     }
     return upgrades.sort((a, b) => b.gain - a.gain);
+  }
+
+  // Équipement obtenu en appliquant des améliorations (pour fabriquer un code d'équipement).
+  function applyUpgrades(slots, upgrades) {
+    const next = slots.map((s) => ({ item: s.item, fusion: s.fusion || 0 }));
+    for (const u of upgrades) next[u.slotIndex] = { item: u.to.item, fusion: u.to.fusion };
+    return next;
+  }
+
+  // Panoplies dont le joueur porte ou possède des pièces : palier actif, prochain palier,
+  // et pièces déjà dans l'inventaire qui permettraient de l'atteindre.
+  function setsAdvice({ sets, slots, inventory, itemsById }) {
+    const worn = new Set(slots.filter((s) => s.item).map((s) => s.item.id));
+    const owned = new Set((inventory || []).map((e) => e.id));
+    return sets
+      .map((set) => {
+        const wornCount = set.pieces.filter((id) => worn.has(id)).length;
+        const ownedPieces = set.pieces.filter((id) => owned.has(id) && !worn.has(id));
+        const sorted = [...set.bonuses].sort((a, b) => a.pieces - b.pieces);
+        return {
+          set,
+          wornCount,
+          active: sorted.filter((b) => b.pieces <= wornCount).pop() || null,
+          next: sorted.find((b) => b.pieces > wornCount) || null,
+          ownedPieces: ownedPieces.map((id) => itemsById[id]).filter(Boolean),
+        };
+      })
+      .filter((x) => x.wornCount > 0 || x.ownedPieces.length >= 2)
+      .sort((a, b) => b.wornCount - a.wornCount || b.ownedPieces.length - a.ownedPieces.length);
+  }
+
+  // Ménage de l'inventaire : fusions possibles, et objets qui ne servent pas ce build
+  // (moins bons que ce qui est porté, hors panoplie portée, non verrouillés).
+  function inventoryCleanup({ inventory, slots, sets = [], itemsById, level, elementKey }) {
+    if (!inventory) return { fusable: [], useless: [] };
+    const fusable = [];
+    const useless = [];
+    const wornByType = new Map();
+    for (const s of slots) {
+      if (!s.item) continue;
+      const t = slotType(s);
+      const sc = itemScore(s.item, elementKey, s.fusion || 0);
+      wornByType.set(t, Math.min(wornByType.get(t) ?? Infinity, sc));
+    }
+    const worn = new Set(slots.filter((s) => s.item).map((s) => s.item.id));
+    const wornSets = new Set(sets.filter((set) => set.pieces.some((id) => worn.has(id))).map((set) => set.id));
+    const inWornSet = (id) => sets.some((set) => wornSets.has(set.id) && set.pieces.includes(id));
+    for (const e of inventory) {
+      const item = itemsById[e.id];
+      if (!item || item.s === "parchemin") continue;
+      const wornScore = wornByType.get(item.s);
+      if (
+        !e.locked && wornScore != null && (level == null || item.lvl <= level) &&
+        !inWornSet(item.id) && itemScore(item, elementKey, e.fusion) < wornScore
+      ) {
+        useless.push({ item, fusion: e.fusion, qty: e.qty });
+        continue; // pas la peine de fusionner un objet qui ne sert pas ce build
+      }
+      const cap = item.s === "dofus" ? FUSION.dofusMax : FUSION.max;
+      if (e.qty >= FUSION.copies && e.fusion < cap) {
+        fusable.push({ item, fusion: e.fusion, qty: e.qty, times: Math.floor(e.qty / FUSION.copies) });
+      }
+    }
+    fusable.sort((a, b) => b.qty - a.qty);
+    useless.sort((a, b) => b.qty - a.qty || a.item.lvl - b.item.lvl);
+    return { fusable, useless };
   }
 
   // Effets qui infligent des dégâts (même liste que le jeu), et effets de soutien.
@@ -266,5 +371,5 @@ var DMX_ADVISOR = (() => {
     return deck.cards.every((x) => active.has(x.card.id));
   }
 
-  return { ELEMENTS, DECK_SIZE, deckIsActive, itemScore, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
+  return { ELEMENTS, DECK_SIZE, FUSION, deckIsActive, itemScore, fusedStats, setBonusScore, applyUpgrades, setsAdvice, inventoryCleanup, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
 })();

@@ -1132,3 +1132,27 @@ input.dmx-highlight {
     transform: translate(-50%, -8px);
   }
 }
+
+/* ---------- Alerte discrète d'énergie pleine ---------- */
+
+#dmx-launcher.dmx-badge,
+#dmx-panel .dmx-header-icon.dmx-badge {
+  position: relative;
+}
+
+#dmx-launcher.dmx-badge::after,
+#dmx-panel.dmx-collapsed .dmx-header-icon.dmx-badge::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-gold, #e4b955);
+  box-shadow: 0 0 0 2px var(--color-night, #120f0b);
+}
+
+#dmx-panel .dmx-header-icon.dmx-badge {
+  position: relative;
+}

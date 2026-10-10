@@ -45,17 +45,25 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 - **Carte du personnage** : nom, classe, niveau, prestige, kamas et énergie (avec le temps
   restant avant le prochain point), plus l'élément du build, déduit de l'équipement porté.
   Classe et élément restent modifiables.
-- **Points de caractéristique**, selon quatre stratégies au choix :
+- **Points de caractéristique** (bouton **« Remplir pour moi »** : la page Personnage s'ouvre
+  avec les champs « Nombre de … à ajouter » déjà remplis), selon quatre stratégies au choix :
   - *Recommandé* : chaque point est placé là où il rapporte le plus, en tenant compte des
     **paliers de coût réels** du jeu (la stat de l'élément tant qu'elle est bon marché, puis la
     Vitalité) ;
   - *Tout dans l'élément*, *Tout en Vitalité* ;
   - *Libre* : le joueur répartit lui-même, l'extension calcule le gain exact et les points restants.
 - **Équipement à changer** : uniquement les objets **déjà présents dans l'inventaire** qui
-  surpassent ceux portés, emplacement par emplacement, avec le gain estimé.
+  surpassent ceux portés, emplacement par emplacement, avec le gain estimé. Le calcul tient
+  compte du **niveau de fusion** des objets et des **bonus de panoplie** gagnés ou perdus.
 - Boutons **« Équiper »** et **« Tout équiper »** : ouvrent la page Personnage avec un code
   d'équipement `DM-E-…` déjà collé dans le champ « Codes d'équipement ». Le joueur clique sur
-  « Importer », le jeu demande confirmation et équipe les objets possédés.
+  « Importer », le jeu demande confirmation et équipe les objets possédés. Les emplacements
+  vides sont aussi remplis.
+- **Panoplies** : pièces portées, bonus actif, prochain palier et pièces déjà dans l'inventaire.
+- **Ménage de l'inventaire** : objets à fusionner (3 copies) et objets inutiles pour le build
+  (moins bons que ceux portés, hors panoplie portée, non verrouillés), à vendre ou briser.
+- **Alerte d'énergie discrète** : un point doré sur le bouton du panneau quand l'énergie, qui
+  se rechargeait, atteint son maximum.
 
 ### Sorts
 - Passif de la classe et sorts les plus rentables (dégâts moyens par PA) dans l'élément choisi.
@@ -147,11 +155,12 @@ des composants dans le HTML, sous forme de fragments `self.__next_f.push([1, "�
 | `/collection?onglet=sorts` | sorts | au plus 1 fois / 24 h |
 | `/personnage` | nom, niveau, prestige, kamas, énergie, classe, équipement, inventaire, caractéristiques, points libres | après une action du joueur (voir ci-dessous) |
 | `/deck` | sorts utilisables, deck actif, taille d'un deck, classe | avec `/personnage` |
+| `/inventaire` | inventaire (objets, fusion, quantité, verrou), panoplies et leurs bonus | avec `/personnage` |
 
 Le **catalogue** (quatre premières lignes) n'est relu qu'au chargement d'une page du jeu, s'il
 a plus de 24 heures, ou à la demande (bouton « Tout relire »).
 
-La **fiche du personnage** (`/personnage` et `/deck`, soit deux requêtes) est relue pour que
+La **fiche du personnage** (`/personnage`, `/deck` et `/inventaire`, soit trois requêtes) est relue pour que
 les conseils suivent ce que fait le joueur :
 
 - quand il change de page sur le site ;
@@ -172,11 +181,12 @@ une page échoue, les autres sont conservées et l'erreur est signalée dans le 
 - **Decks** : sorts utilisables par le personnage (liste fournie par la page Deck), classés par
   dégâts moyens par PA dans l'élément, complétés par des sorts de soutien selon le style du
   deck. Un deck est considéré comme équipé si le deck actif contient tous ses sorts.
-- **Codes d'équipement** : le générateur de code est côté serveur. L'extension décode le code
-  de l'équipement porté fourni par le site, vérifie qu'elle sait le **reproduire à l'identique**
-  (même contrôle) et que chaque objet porté y apparaît une seule fois, puis remplace l'objet
-  porté par le nouveau. Si l'une de ces vérifications échoue, aucun code n'est proposé.
-  Les emplacements vides ne peuvent pas être remplis par ce moyen.
+- **Codes d'équipement** : format déduit d'un code fourni par le site. Avant de proposer ses
+  propres codes, l'extension vérifie qu'elle **reproduit exactement** le code de l'équipement
+  porté fourni par le site ; sinon, aucun code n'est proposé.
+- **Fusion et panoplies** : les stats d'un objet fusionné sont majorées selon les règles du jeu ;
+  une amélioration n'est conseillée que si elle reste positive une fois les bonus de panoplie
+  gagnés ou perdus pris en compte (palier le plus haut atteint pour chaque panoplie).
 - **Étapes faites** : une étape qui disparaît après une relecture de la fiche (points placés,
   objet équipé, deck en place) est affichée comme faite jusqu'au rechargement de la page.
 - **Code de deck** : même encodage que le bouton « Code du deck » du site (version `2`, classe,
@@ -203,7 +213,10 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
 | Paramètre `n` des listes d'objets | Lecture du catalogue complet |
 | Chemins `/personnage`, `/deck`, `/inventaire`, `/chasse`, `/aventure` | Liens et détection des actions du joueur |
 | Format des codes de deck `DM-S-…` | Bouton de copie du deck |
-| Champ `choices` de `/personnage` (`{ key, label, count, code }`) et format des codes `DM-E-…` | Boutons « Équiper » |
+| Champ `choices` de `/personnage` (`{ key, label, count, code }`) et format des codes `DM-E-…` (`[2, n, (emplacement × 8 + fusion, objet)…]`, contrôle salé à 69) | Boutons « Équiper » |
+| Props de la page Inventaire (`entries` `{ item, fusion, qty, locked }`, `sets` `{ id, n, pieces, bonuses: [{ pieces, stats }] }`) | Inventaire, panoplies, ménage |
+| Champs « Nombre de <caractéristique> à ajouter » de la page Personnage | Bouton « Remplir pour moi » |
+| Règles de fusion (3 copies ; +10 à +45 % de stats selon le niveau, hors PA/PM/PO/invocations) | Note des objets fusionnés, ménage |
 | Champ d'import « Code d'équipement à importer » de la page Personnage | Remplissage du code |
 | Images `/img/items/`, `/img/spells/sort_`, `/img/monsters/`, `/img/breeds/` | Icônes |
 | Variables CSS `--color-*`, `--font-*`, `--dm-*` | Apparence (valeurs de secours intégrées) |

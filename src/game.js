@@ -216,40 +216,18 @@ var DMX_GAME = (() => {
     return encodeCode("DM-S-", bytes, 83);
   }
 
-  // Codes d'équipement (« DM-E-… ») : le site fournit le code de l'équipement porté, mais
-  // pas son générateur. On le décode en une liste d'entiers ; si on sait le ré-encoder à
-  // l'identique (même contrôle) et que les objets portés y figurent, on peut remplacer
-  // un objet porté par un autre. Sinon : null, et l'extension ne propose pas de code.
-  function gearCodeTemplate(code, wornItemIds) {
-    const decoded = decodeCode("DM-E-", code);
-    if (!decoded) return null;
-    const values = readVarints(decoded.bytes);
-    if (!values) return null;
-    // Le contrôle commence par un octet fixe inconnu : on cherche celui qui redonne le code.
-    let salt = null;
-    for (let s = 0; s < 256 && salt == null; s++) if (codeCheck(decoded.bytes, s) === decoded.check) salt = s;
-    if (salt == null || encodeCode("DM-E-", writeVarints(values), salt) !== String(code).trim().toUpperCase()) {
-      return null;
-    }
-    // Chaque objet porté doit apparaître une seule fois parmi les entiers du code.
-    const positions = new Map();
-    for (const id of new Set(wornItemIds)) {
-      const at = values.flatMap((v, i) => (v === id ? [i] : []));
-      if (at.length !== 1) return null;
-      positions.set(id, at[0]);
-    }
-    return { values, salt, positions };
-  }
-
-  // Nouveau code où chaque objet porté `from` est remplacé par `to` : [[fromId, toId], ...].
-  function gearCodeWith(template, replacements) {
-    const values = [...template.values];
-    for (const [from, to] of replacements) {
-      const at = template.positions.get(from);
-      if (at == null || !Number.isInteger(to) || to <= 0) return null;
-      values[at] = to;
-    }
-    return encodeCode("DM-E-", writeVarints(values), template.salt);
+  // Codes d'équipement (« DM-E-… »), à coller dans Personnage → « Codes d'équipement ».
+  // Format (déduit d'un code du site) : [2, nombre d'objets, puis pour chaque objet
+  // emplacement × 8 + fusion, identifiant], contrôle salé à 69 (« E »). `slots` = liste
+  // ordonnée des emplacements de la fiche (index = numéro d'emplacement), chacun
+  // { item, fusion } ou vide. L'extension vérifie qu'elle reproduit le code de
+  // l'équipement porté fourni par le site avant de proposer ses propres codes.
+  function gearCode(slots) {
+    const values = [];
+    slots.forEach((slot, index) => {
+      if (slot?.item?.id) values.push(index * 8 + (slot.fusion || 0), slot.item.id);
+    });
+    return encodeCode("DM-E-", writeVarints([2, values.length / 2, ...values]), 69);
   }
 
   // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
@@ -262,5 +240,5 @@ var DMX_GAME = (() => {
     return parseFlight(flightFromHtml(await res.text()));
   }
 
-  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, findObject, readHeaderLevel, deckCode, encodeCode, decodeCode, readVarints, writeVarints, gearCodeTemplate, gearCodeWith, fetchPageData };
+  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, findObject, readHeaderLevel, deckCode, encodeCode, decodeCode, readVarints, writeVarints, gearCode, fetchPageData };
 })();

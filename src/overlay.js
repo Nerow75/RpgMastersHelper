@@ -144,21 +144,11 @@
     const equipped = (character?.slots || []).map((s) => s.item).filter(Boolean);
     const detectedElement = DMX_ADVISOR.detectElement(equipped);
 
-    // Objets possédés : inventaire de la fiche perso, objets portés, et collection si ouverte.
-    const ownedIds = new Set([...(character?.inventoryIds || []), ...cat.ownedItemIds]);
-    for (const item of equipped) ownedIds.add(item.id);
-    const ownedNames = new Set(
-      Object.values(profile.items).filter((i) => i.owned).map((i) => i.name)
-    );
-    if (ownedNames.size) {
-      for (const item of Object.values(cat.items)) if (ownedNames.has(item.n)) ownedIds.add(item.id);
-    }
-
     const detectedClass = character?.classId ?? null;
-    // Code de l'équipement porté fourni par le site, transformable en code « équipe X à la
-    // place de Y » si l'extension sait le reproduire à l'identique (voir DMX_GAME.gearCodeTemplate).
+    // Codes d'équipement : l'extension ne propose les siens que si elle reproduit exactement
+    // le code de l'équipement porté fourni par le site (même format, même contrôle).
     const wornCode = (character?.gearCodes || []).find((c) => c.key === "worn") || character?.gearCodes?.[0];
-    const gearTemplate = wornCode ? DMX_GAME.gearCodeTemplate(wornCode.code, equipped.map((i) => i.id)) : null;
+    const gearCodesOk = !!wornCode && !!character?.slots?.length && DMX_GAME.gearCode(character.slots) === wornCode.code;
     return {
       cat,
       character,
@@ -169,10 +159,11 @@
       elementKey: settings.elementKey || detectedElement || "terre",
       detectedClass,
       classId: settings.classId ?? detectedClass,
-      ownedIds,
+      inventory: character?.inventory ?? null,
+      sets: character?.sets || [],
+      gearCodesOk,
       ownedCardIds: cat.ownedCardIds.length ? new Set(cat.ownedCardIds) : null,
       // Page Deck du jeu : sorts utilisables, deck actif, taille d'un deck.
-      gearTemplate,
       usableCardIds: character?.deck?.usableCardIds?.length ? new Set(character.deck.usableCardIds) : null,
       activeDeckIds: character?.deck?.activeDeckIds || [],
       deckSize: character?.deck?.size || DMX_ADVISOR.DECK_SIZE,
@@ -316,37 +307,82 @@
       .map((row) => `<p class="dmx-warn">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
         build ${el.label}.</p>`)
       .join("");
+    const fill = plan.alloc.length
+      ? `<div class="dmx-todo-actions"><button class="dmx-btn-primary" data-fill-points>Remplir pour moi</button></div>` : "";
     return `<p>Tu as <strong>${c.pointsFree}</strong> points à placer.</p>
       <div class="dmx-modes">${modes}</div>
-      <p class="dmx-dim">${why}</p>${result}${wasted}`;
+      <p class="dmx-dim">${why}</p>${result}${wasted}${fill}`;
   }
+
+  // Améliorations possibles avec l'inventaire (calculées une fois par rendu).
+  function upgradesFor(s) {
+    if (!s.character?.slots?.length) return [];
+    return (s._upgrades ??= DMX_ADVISOR.gearUpgrades({
+      slots: s.character.slots,
+      inventory: s.inventory,
+      itemsById: s.cat.items,
+      sets: s.sets,
+      level: s.level,
+      elementKey: s.elementKey,
+    }));
+  }
+
+  const fusionText = (x) => (x.fusion ? ` · fusion ${x.fusion}` : "");
 
   function renderGear(s) {
     if (!s.character?.slots.length) return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
-    const upgrades = DMX_ADVISOR.gearUpgrades({
-      items: s.items,
-      slots: s.character.slots,
-      ownedIds: s.ownedIds,
-      level: s.level,
-      elementKey: s.elementKey,
-    });
+    if (!s.inventory) return `<p class="dmx-empty">Inventaire pas encore lu.</p>`;
+    const upgrades = upgradesFor(s);
     if (!upgrades.length) {
       return `<div class="dmx-callout">✔ Tu portes déjà ce que tu as de mieux pour un build
         ${ELEMENTS[s.elementKey].label}.</div>`;
     }
     const allCode = gearCodeFor(s, upgrades);
-    const replaceable = upgrades.filter((u) => u.from).length;
     const equipAll = allCode
       ? `<div class="dmx-todo-actions"><button class="dmx-btn-primary" data-gear-code="${escapeHtml(allCode)}">
-          Tout équiper (${replaceable})</button></div>` : "";
+          Tout équiper (${upgrades.length})</button></div>` : "";
     return equipAll + upgrades
       .map((u) => `<div class="dmx-slot"><div class="dmx-slot-label">${escapeHtml(u.label)}
           <span class="dmx-chip dmx-chip-up">+${u.gain} pts</span></div>
-        ${u.from ? itemHtml(u.from, `retire · niv. ${u.from.lvl}`) : `<p class="dmx-dim">Emplacement vide</p>`}
+        ${u.from ? itemHtml(u.from.item, `retire · niv. ${u.from.item.lvl}${fusionText(u.from)}`) : `<p class="dmx-dim">Emplacement vide</p>`}
         <div class="dmx-arrow">↓ équipe</div>
-        ${itemHtml(u.to, `dans ton inventaire · niv. ${u.to.lvl}`)}</div>`)
-      .join("") + `<p class="dmx-dim">Comparaison des stats pour un build ${ELEMENTS[s.elementKey].label}.
-        Survole un objet pour voir ses stats.</p>`;
+        ${itemHtml(u.to.item, `dans ton inventaire · niv. ${u.to.item.lvl}${fusionText(u.to)}`)}</div>`)
+      .join("") + `<p class="dmx-dim">Comparaison des stats (fusion et bonus de panoplie compris) pour un
+        build ${ELEMENTS[s.elementKey].label}. Survole un objet pour voir ses stats.</p>`;
+  }
+
+  // ---------- Panoplies ----------
+  function renderSets(s) {
+    const list = DMX_ADVISOR.setsAdvice({ sets: s.sets, slots: s.character?.slots || [], inventory: s.inventory, itemsById: s.cat.items });
+    if (!list.length) return "";
+    const bonus = (b) => (b ? escapeHtml(statsText(b.stats)) || "aucun bonus" : "");
+    const rows = list.slice(0, 4).map((x) => `<li class="dmx-row">
+        <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(x.set.n)}</span>
+          <span class="dmx-chip">${x.wornCount}/${x.set.pieces.length} portées</span></div>
+        ${x.active ? `<div class="dmx-dim"><span class="dmx-up">Actif (${x.active.pieces} pièces)</span> : ${bonus(x.active)}</div>` : ""}
+        ${x.next ? `<div class="dmx-dim">À ${x.next.pieces} pièces : ${bonus(x.next)}</div>` : ""}
+        ${x.next && x.ownedPieces.length ? `<div class="dmx-dim">Dans ton inventaire : ${x.ownedPieces.map((i) => escapeHtml(i.n)).join(", ")}</div>` : ""}
+      </li>`);
+    return `<section><h4>Panoplies ${help("Porter plusieurs pièces d'une même panoplie donne des bonus. Ils sont déjà pris en compte dans « Équipement à changer ».")}</h4><ul>${rows.join("")}</ul></section>`;
+  }
+
+  // ---------- Ménage de l'inventaire ----------
+  function renderCleanup(s) {
+    const { fusable, useless } = DMX_ADVISOR.inventoryCleanup({
+      inventory: s.inventory,
+      slots: s.character?.slots || [],
+      sets: s.sets,
+      itemsById: s.cat.items,
+      level: s.level,
+      elementKey: s.elementKey,
+    });
+    if (!fusable.length && !useless.length) return "";
+    const fuse = fusable.slice(0, 5).map((x) => itemHtml(x.item, `×${x.qty}${fusionText(x)} · ${x.times} fusion${x.times > 1 ? "s" : ""} possible${x.times > 1 ? "s" : ""}`)).join("");
+    const junk = useless.slice(0, 5).map((x) => itemHtml(x.item, `×${x.qty} · niv. ${x.item.lvl}${fusionText(x)}`)).join("");
+    return `<section><h4>Ménage de l'inventaire ${help("Fusionner 3 copies identiques d'un objet augmente ses stats. Les objets « inutiles » sont moins bons que ceux que tu portes pour ton élément et hors de tes panoplies : tu peux les vendre ou les briser. Verrouille ceux que tu veux garder.")}</h4>
+      ${fuse ? `<p class="dmx-dim">À fusionner (${fusable.length}) :</p>${fuse}` : ""}
+      ${junk ? `<p class="dmx-dim" style="margin-top:6px">Inutiles pour ton build (${useless.length}) :</p>${junk}` : ""}
+      <div class="dmx-todo-actions"><a class="dmx-btn-ghost" href="/inventaire">Ouvrir Inventaire →</a></div></section>`;
   }
 
   // Liste d'actions concrètes, dans l'ordre, avec un bouton vers la bonne page.
@@ -369,9 +405,8 @@
   // disparaît après une relecture du personnage, c'est qu'elle a été faite (voir renderTodo).
   // Code d'équipement qui applique ces améliorations, ou null si impossible.
   function gearCodeFor(s, upgrades) {
-    if (!s.gearTemplate) return null;
-    const replacements = upgrades.filter((u) => u.from).map((u) => [u.from.id, u.to.id]);
-    return replacements.length ? DMX_GAME.gearCodeWith(s.gearTemplate, replacements) : null;
+    if (!s.gearCodesOk || !upgrades.length) return null;
+    return DMX_GAME.gearCode(DMX_ADVISOR.applyUpgrades(s.character.slots, upgrades));
   }
 
   function todoSteps(s) {
@@ -391,26 +426,21 @@
       steps.push({
         key: "points",
         title: `Place tes ${c.pointsFree} points de caractéristique`,
+        fillPoints: plan.alloc.length > 0,
         text: summary ? `Conseillé : ${summary}. Sur la page Personnage, clique sur « + » à côté de chaque
           caractéristique.` : "Choisis une répartition plus bas.",
         doneTitle: "Points de caractéristique placés",
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
-    const upgrades = DMX_ADVISOR.gearUpgrades({
-      items: s.items,
-      slots: c.slots,
-      ownedIds: s.ownedIds,
-      level: s.level,
-      elementKey: s.elementKey,
-    });
+    const upgrades = upgradesFor(s);
     for (const u of upgrades.slice(0, 3)) {
       steps.push({
-        key: `equip:${u.to.id}`,
-        title: `Équipe ${u.to.n}`,
-        text: `${u.label} : ${u.from ? `à la place de ${u.from.n}` : "emplacement vide"}. Tu l'as déjà
+        key: `equip:${u.to.item.id}`,
+        title: `Équipe ${u.to.item.n}`,
+        text: `${u.label} : ${u.from ? `à la place de ${u.from.item.n}` : "emplacement vide"}. Tu l'as déjà
           dans ton inventaire (+${u.gain} pts).`,
-        doneTitle: `${u.to.n} équipé`,
+        doneTitle: `${u.to.item.n} équipé`,
         gearCode: gearCodeFor(s, [u]),
         link: ["/personnage", "Ouvrir Personnage"],
       });
@@ -467,6 +497,7 @@
         <div class="dmx-todo-actions">
           ${step.deck != null ? `<button class="dmx-btn-primary" data-deck="${step.deck}">Copier le code</button>` : ""}
           ${step.gearCode ? `<button class="dmx-btn-primary" data-gear-code="${escapeHtml(step.gearCode)}">Équiper</button>` : ""}
+          ${step.fillPoints ? `<button class="dmx-btn-primary" data-fill-points>Remplir pour moi</button>` : ""}
           ${step.link ? `<a class="dmx-btn-ghost" href="${step.link[0]}">${step.link[1]} →</a>` : ""}
           ${(step.links || []).map(([href, label]) => `<a class="dmx-btn-ghost" href="${href}">${label} →</a>`).join("")}
           ${step.manual ? `<button class="dmx-btn-ghost" data-done="${step.key}">✓ C'est fait</button>` : ""}
@@ -549,7 +580,7 @@
           <div class="dmx-stat-value">${energy ? `${energy.value}${energy.max ? `<small>/${energy.max}</small>` : ""}` : "?"}</div>
           ${pct != null ? `<div class="dmx-energy-bar"><span style="width:${pct}%"></span></div>` : ""}
           ${energy?.nextIn != null ? `<div class="dmx-stat-sub">+1 dans ${formatDelay(energy.nextIn)}</div>`
-            : energy && energy.max && energy.value >= energy.max ? `<div class="dmx-stat-sub">pleine</div>` : ""}</div>
+            : energy && energy.max && energy.value >= energy.max ? `<div class="dmx-stat-sub" title="La recharge reprend quand tu dépenses de l'énergie">pleine · recharge en pause</div>` : ""}</div>
         <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
           <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
       </div>`;
@@ -561,7 +592,9 @@
       ${renderProfile(s)}
       <section><h4>À faire maintenant</h4>${renderTodo(s)}</section>
       <section><h4>Points de caractéristique ${help(`Tu gagnes des points à chaque niveau. Plus une caractéristique est haute, plus un point coûte cher (1, puis 2, 3, 4 points). ${el.statLabel} augmente tes dégâts ${el.label}, Vitalité tes points de vie.`)}</h4>${renderPoints(s)}</section>
-      <section><h4>Équipement à changer ${help("Objets de ton inventaire qui sont meilleurs que ce que tu portes pour ton élément. « pts » = note de l'objet : plus c'est haut, mieux c'est.")}</h4>${renderGear(s)}</section>`;
+      <section><h4>Équipement à changer ${help("Objets de ton inventaire qui sont meilleurs que ce que tu portes pour ton élément. « pts » = note de l'objet : plus c'est haut, mieux c'est.")}</h4>${renderGear(s)}</section>
+      ${renderSets(s)}
+      ${renderCleanup(s)}`;
   }
 
   // ---------- Onglet Sorts ----------
@@ -711,8 +744,8 @@
       const seconds = Math.round((Date.now() - s.cat.characterAt) / 1000);
       const ago = seconds < 60 ? "à l'instant" : seconds < 3600 ? `il y a ${Math.round(seconds / 60)} min`
         : `il y a ${Math.round(seconds / 3600)} h`;
-      status.innerHTML = `<span class="dmx-live">●</span> Personnage à jour ${ago} · ${s.items.length} objets ·
-        ${Object.keys(s.cat.cards).length} sorts`;
+      const inv = s.inventory ? `${s.inventory.reduce((n, e) => n + e.qty, 0)} objets en inventaire` : `${s.items.length} objets connus`;
+      status.innerHTML = `<span class="dmx-live">●</span> Personnage à jour ${ago} · ${inv}`;
     } else status.textContent = "Pas encore synchronisé";
     $(".dmx-sync").disabled = syncing;
   }
@@ -748,28 +781,46 @@
       }
     }
     renderStatus(s);
+    checkEnergy(s);
   }
 
-  // ---------- Bouton « Équiper » ----------
-  // On ne déclenche aucune action du jeu : on ouvre la page Personnage avec le code déjà collé
-  // dans son champ « Codes d'équipement ». Le joueur clique sur « Importer », le jeu demande
-  // confirmation et équipe les objets qu'il possède.
-  const PENDING_GEAR_KEY = "dmx-pending-gear-code";
-
-  function queueGearCode(code) {
-    try {
-      sessionStorage.setItem(PENDING_GEAR_KEY, JSON.stringify({ code, at: Date.now() }));
-    } catch {
-      return window.prompt("Colle ce code dans Personnage → Codes d'équipement :", code);
+  // ---------- Alerte discrète : énergie pleine ----------
+  // Un point doré sur le bouton flottant / l'icône du titre quand l'énergie, qui se
+  // rechargeait, atteint son maximum (la recharge s'arrête alors). Rien si elle est déjà
+  // au-dessus du maximum en arrivant (énergie achetée ou gagnée).
+  let energyWasRecharging = false;
+  function checkEnergy(s) {
+    const e = energyNow(s.character?.energy);
+    if (!e?.max) return;
+    if (e.value < e.max) {
+      energyWasRecharging = true;
+      setEnergyBadge(false);
+    } else if (energyWasRecharging) {
+      energyWasRecharging = false;
+      setEnergyBadge(true);
     }
-    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
-    else location.assign("/personnage");
+  }
+  function setEnergyBadge(on) {
+    launcher.classList.toggle("dmx-badge", on);
+    $(".dmx-header-icon").classList.toggle("dmx-badge", on);
+    launcher.title = on ? "Énergie pleine · ouvrir le conseiller" : "Ouvrir le conseiller RpgMasters";
   }
 
-  function gearCodeInput() {
-    return [...document.querySelectorAll("main input")].find((i) =>
-      /code d.équipement/i.test(i.getAttribute("aria-label") || "") || /DM-E-/.test(i.placeholder || "")
-    );
+  // ---------- Boutons « Équiper » et « Remplir pour moi » ----------
+  // On ne déclenche aucune action du jeu : on ouvre la page Personnage et on pré-remplit
+  // ses champs (code d'équipement, ou nombre de points par caractéristique). Le joueur
+  // valide avec les boutons du jeu (« Importer », « Ajouter »).
+  const PENDING_KEY = "dmx-pending-fill";
+
+  function queueFill(action) {
+    try {
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ ...action, at: Date.now() }));
+    } catch {
+      if (action.type === "gear") window.prompt("Colle ce code dans Personnage → Codes d'équipement :", action.code);
+      return;
+    }
+    if (location.pathname.startsWith("/personnage")) fillPending();
+    else location.assign("/personnage");
   }
 
   function toast(message) {
@@ -780,30 +831,52 @@
     setTimeout(() => el.remove(), 7000);
   }
 
-  function fillPendingGearCode() {
+  // Champ géré par React : on passe par le setter natif puis un événement « input ».
+  function setInputValue(input, value) {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, String(value));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.classList.add("dmx-highlight");
+    setTimeout(() => input.classList.remove("dmx-highlight"), 6000);
+  }
+
+  const mainInputs = () => [...document.querySelectorAll("main input")];
+  const gearCodeInput = () =>
+    mainInputs().find((i) => /code d.équipement/i.test(i.getAttribute("aria-label") || "") || /DM-E-/.test(i.placeholder || ""));
+  // Champ « Nombre de <Caractéristique> à ajouter » (n'existe que s'il reste des points).
+  const pointsInput = (label) =>
+    mainInputs().find((i) => (i.getAttribute("aria-label") || "").toLowerCase() === `nombre de ${label} à ajouter`.toLowerCase());
+
+  function fillPending() {
     let pending = null;
     try {
-      pending = JSON.parse(sessionStorage.getItem(PENDING_GEAR_KEY) || "null");
+      pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
     } catch {
       // Stockage indisponible : rien à remplir.
     }
     if (!pending || Date.now() - pending.at > 2 * 60 * 1000) return;
     const startedAt = Date.now();
     const tryFill = () => {
-      const input = gearCodeInput();
-      if (!input) {
-        if (Date.now() - startedAt < 15000) setTimeout(tryFill, 300);
-        else toast("Champ « Codes d'équipement » introuvable : colle le code à la main.");
-        return;
+      const ready = pending.type === "gear" ? gearCodeInput() : pointsInput(pending.points[0].label);
+      if (!ready) {
+        if (Date.now() - startedAt < 15000) return setTimeout(tryFill, 300);
+        sessionStorage.removeItem(PENDING_KEY);
+        return toast(pending.type === "gear"
+          ? "Champ « Codes d'équipement » introuvable : colle le code à la main."
+          : "Champs des caractéristiques introuvables : place tes points à la main.");
       }
-      sessionStorage.removeItem(PENDING_GEAR_KEY);
-      // Champ géré par React : on passe par le setter natif puis un événement « input ».
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, pending.code);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.scrollIntoView({ block: "center", behavior: "smooth" });
-      input.classList.add("dmx-highlight");
-      setTimeout(() => input.classList.remove("dmx-highlight"), 6000);
-      toast("Code d'équipement collé ✓ Clique sur « Importer » pour équiper.");
+      sessionStorage.removeItem(PENDING_KEY);
+      if (pending.type === "gear") {
+        setInputValue(ready, pending.code);
+        ready.scrollIntoView({ block: "center", behavior: "smooth" });
+        toast("Code d'équipement collé ✓ Clique sur « Importer » pour équiper.");
+      } else {
+        for (const p of pending.points) {
+          const input = pointsInput(p.label);
+          if (input) setInputValue(input, p.amount);
+        }
+        ready.scrollIntoView({ block: "center", behavior: "smooth" });
+        toast(`Points pré-remplis ✓ Clique sur « Ajouter » ${pending.points.length > 1 ? "pour chaque caractéristique" : ""}.`);
+      }
     };
     tryFill();
   }
@@ -845,7 +918,7 @@
     if (location.href === lastUrl) return;
     lastUrl = location.href;
     refreshCharacterSoon(800);
-    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
+    if (location.pathname.startsWith("/personnage")) fillPending();
   }, 700);
 
   document.addEventListener("visibilitychange", () => {
@@ -925,7 +998,15 @@
     }
     const gearCode = e.target.closest("[data-gear-code]")?.dataset.gearCode;
     if (gearCode) {
-      queueGearCode(gearCode);
+      queueFill({ type: "gear", code: gearCode });
+      return;
+    }
+    if (e.target.closest("[data-fill-points]")) {
+      const s = state();
+      const c = s.character;
+      const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, settings.pointsMode, s.elementKey, settings.customPoints);
+      // Le champ du jeu attend le nombre de points de caractéristique à ajouter (+N), pas leur coût.
+      queueFill({ type: "points", points: plan.alloc.map((a) => ({ label: a.row.label, amount: a.gain })) });
       return;
     }
     const doneKey = e.target.closest("[data-done]")?.dataset.done;
@@ -964,6 +1045,7 @@
   $(".dmx-sync").addEventListener("click", () => sync(true));
 
   launcher.addEventListener("click", () => {
+    setEnergyBadge(false);
     settings.visible = true;
     applyVisibility();
     save();
@@ -1008,7 +1090,8 @@
     const st = state();
     report.diagnostic = {
       objetsConnus: st.items.length,
-      objetsInventaire: st.character?.inventoryIds?.length ?? null,
+      objetsInventaire: st.inventory ? st.inventory.reduce((n, e) => n + e.qty, 0) : null,
+      lignesInventaire: st.inventory?.length ?? null,
       objetsPortes: (st.character?.slots || []).filter((x) => x.item).length,
       sortsConnus: Object.keys(st.cat.cards).length,
       sortsUtilisables: st.character?.deck?.usableCardIds?.length ?? null,
@@ -1018,7 +1101,8 @@
       classe: st.classId,
       energieLue: !!st.character?.energy,
       codesEquipement: (st.character?.gearCodes || []).length,
-      codeEquipementReconnu: !!st.gearTemplate,
+      codeEquipementReconnu: st.gearCodesOk,
+      panoplies: st.sets.length,
       pagesEnErreur: st.cat.syncErrors || [],
     };
     out.value = JSON.stringify(report, null, 1);
@@ -1088,6 +1172,7 @@
     button.title = button.ariaLabel = settings.collapsed ? "Déplier" : "Replier";
   }
   $(".dmx-collapse").addEventListener("click", () => {
+    if (settings.collapsed) setEnergyBadge(false);
     settings.collapsed = !settings.collapsed;
     applyCollapsed();
     save();
@@ -1140,7 +1225,7 @@
     document.body.append(panel, launcher);
     applyCollapsed();
     placePanel();
-    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
+    if (location.pathname.startsWith("/personnage")) fillPending();
     scan();
     sync(false);
   })();
