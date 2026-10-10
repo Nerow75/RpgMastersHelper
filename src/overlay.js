@@ -7,7 +7,16 @@
 
   const data = DMX_DATA;
   const STORAGE_KEY = "dmx-settings";
+  const PROFILE_KEY = "dmx-profile";
   let settings = { classKey: "iop", elementKey: "terre", visible: true };
+  // Ce que l'extension a lu dans le jeu : niveau + objets vus sur la page "Ma collection".
+  let profile = { level: null, items: {} };
+
+  // Ordre d'affichage des emplacements ; combien d'objets recommander pour chacun.
+  const SLOTS = [
+    ["Arme", 1], ["Bouclier", 1], ["Chapeau", 1], ["Cape", 1], ["Amulette", 1],
+    ["Anneau", 2], ["Ceinture", 1], ["Bottes", 1], ["Familier", 1], ["Dofus / Trophée", 6],
+  ];
 
   const panel = document.createElement("div");
   panel.id = "dmx-panel";
@@ -51,6 +60,53 @@
     elementSelect.value = settings.elementKey;
   }
 
+  // Pour chaque emplacement : les meilleurs objets (niveau le plus haut) équipables à ton niveau.
+  function bestBySlot(owned) {
+    const items = Object.values(profile.items).filter(
+      (i) => i.owned === owned && (profile.level == null || i.level <= profile.level)
+    );
+    const rows = [];
+    for (const [slot, count] of SLOTS) {
+      const best = items
+        .filter((i) => i.type === slot)
+        .sort((a, b) => b.level - a.level)
+        .slice(0, count);
+      if (best.length) rows.push([slot, best]);
+    }
+    return rows;
+  }
+
+  function slotTable(rows) {
+    return `<table class="dmx-slots">${rows
+      .map(
+        ([slot, items]) =>
+          `<tr><th>${escapeHtml(slot)}</th><td>${items
+            .map((i) => `${escapeHtml(i.name)} <span class="dmx-dim">niv. ${i.level}</span>`)
+            .join("<br>")}</td></tr>`
+      )
+      .join("")}</table>`;
+  }
+
+  function renderProfile() {
+    const known = Object.keys(profile.items).length;
+    const level = profile.level != null ? `Niveau <strong>${profile.level}</strong>` : "Niveau inconnu";
+    if (!known) {
+      return `<section><h4>Ton personnage</h4><p>${level}</p>
+        <p class="dmx-empty">Ouvre « Ma collection » pour que l'extension lise ton niveau et tes objets.</p></section>`;
+    }
+    const mine = bestBySlot(true);
+    const targets = bestBySlot(false);
+    return `
+      <section><h4>Ton personnage</h4><p>${level} · ${known} objets lus</p></section>
+      <section><h4>Ton meilleur équipement possédé</h4>
+        ${mine.length ? slotTable(mine) : `<p class="dmx-empty">Aucun objet obtenu repéré.</p>`}</section>
+      <section><h4>Objets à viser</h4>
+        ${targets.length ? slotTable(targets) : `<p class="dmx-empty">Rien à signaler.</p>`}
+        <p class="dmx-dim">Seuls les objets déjà affichés sont connus : dans « Ma collection », clique sur
+        le filtre « Niv. … à ${profile.level ?? "…"} » pour voir ceux de ton niveau.</p></section>
+    `;
+  }
+
   function render() {
     const cls = data.classes[settings.classKey];
     const el = data.elements[settings.elementKey];
@@ -70,6 +126,7 @@
          Ajoute-le dans <code>data/builds.js</code>.</p>`;
 
     body.innerHTML = `
+      ${renderProfile()}
       <section><h4>Rôle</h4><p>${escapeHtml(cls.role)}</p></section>
       <section><h4>Points de caractéristique</h4>${list(el.points)}</section>
       <section><h4>Équipement</h4>${list(el.gear)}</section>
@@ -132,13 +189,45 @@
     save();
   });
 
-  chrome.storage.local.get(STORAGE_KEY, (stored) => {
+  // Relit la page et met à jour le profil si quelque chose a changé.
+  function scan() {
+    let changed = false;
+    const level = DMX_GAME.readLevel(document);
+    if (level != null && level !== profile.level) {
+      profile.level = level;
+      changed = true;
+    }
+    for (const item of DMX_GAME.readCollection(document)) {
+      const prev = profile.items[item.name];
+      if (!prev || prev.owned !== item.owned || prev.level !== item.level) {
+        profile.items[item.name] = item;
+        changed = true;
+      }
+    }
+    if (changed) {
+      chrome.storage.local.set({ [PROFILE_KEY]: profile });
+      render();
+    }
+  }
+
+  // Le site change de page sans recharger (Next.js) et charge les objets au fur et à mesure :
+  // on relit la page à chaque modification, en ignorant celles de notre propre panneau.
+  let scanTimer = null;
+  new MutationObserver((mutations) => {
+    if (mutations.every((m) => panel.contains(m.target))) return;
+    clearTimeout(scanTimer);
+    scanTimer = setTimeout(scan, 300);
+  }).observe(document.body, { childList: true, subtree: true });
+
+  chrome.storage.local.get([STORAGE_KEY, PROFILE_KEY], (stored) => {
     const saved = stored[STORAGE_KEY];
     if (saved && data.classes[saved.classKey]) settings = { ...settings, ...saved };
+    if (stored[PROFILE_KEY]) profile = { ...profile, ...stored[PROFILE_KEY] };
     classSelect.value = settings.classKey;
     fillElements();
     render();
     applyVisibility();
     document.body.appendChild(panel);
+    scan();
   });
 })();

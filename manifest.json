@@ -29,6 +29,7 @@
       ],
       "js": [
         "data/builds.js",
+        "src/game.js",
         "src/overlay.js"
       ],
       "css": [

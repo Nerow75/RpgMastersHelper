@@ -10,6 +10,15 @@ recommandations par-dessus [Dofus Masters](https://rpgmasters.houk.fr/) :
 
 Tu choisis ta classe et ton élément dans le panneau ; ton choix est mémorisé.
 
+L'extension lit aussi (sans rien modifier) la page **Ma collection** :
+
+- ton niveau (« Équipables par moi (niv. 112 ou moins) ») ;
+- les objets affichés, obtenus ou non.
+
+Elle en déduit ton meilleur équipement possédé par emplacement et les objets à viser
+à ton niveau. Les objets ne sont connus qu'une fois affichés : utilise le filtre
+« Niv. … à … » de la collection pour charger ceux de ton niveau.
+
 ## Installer (mode développeur)
 
 1. Télécharge ce dépôt (bouton **Code → Download ZIP**, puis dézippe-le) ou clone-le.
@@ -29,6 +38,7 @@ l'extension dans `chrome://extensions`, puis recharge la page du jeu.
 | Fichier | Rôle |
 | --- | --- |
 | `manifest.json` | Déclaration de l'extension (nom, permissions, site ciblé) |
+| `src/game.js` | Lit les infos affichées par le jeu (niveau, objets) |
 | `data/builds.js` | **Toutes les recommandations** (classes, éléments, decks) |
 | `src/overlay.js` | Construit et affiche le panneau dans la page |
 | `src/overlay.css` | Style du panneau |
