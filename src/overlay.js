@@ -13,6 +13,9 @@
     elementKey: null,
     tab: "conseils",
     visible: true,
+    welcomed: false, // message d'accueil déjà fermé
+    collapsed: false, // panneau replié sur son en-tête
+    pos: null, // { left, top } si le joueur l'a déplacé
     pointsMode: "optimal", // optimal | element | vitalite | libre
     customPoints: {}, // mode libre : { clé de stat: points }
   };
@@ -37,14 +40,21 @@
         <div class="dmx-kicker">Dofus Masters Helper</div>
         <div class="dmx-title">Conseiller</div>
       </div>
-      <button class="dmx-close" title="Masquer" aria-label="Masquer">
+      <button class="dmx-collapse dmx-icon-btn" title="Replier" aria-label="Replier" aria-expanded="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"></path></svg>
+      </button>
+      <button class="dmx-close dmx-icon-btn" title="Fermer" aria-label="Fermer">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
           stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
       </button>
     </div>
     <div class="dmx-controls">
-      <label>Classe <select class="dmx-class"></select></label>
-      <label>Élément <select class="dmx-element"></select></label>
+      <div class="dmx-field"><span class="dmx-field-label">Classe</span><div class="dmx-class"></div></div>
+      <div class="dmx-field"><span class="dmx-field-label">Élément
+        <span class="dmx-help" tabindex="0" data-tip="Le type de dégâts de ton build : Terre (Force),
+          Feu (Intelligence), Eau (Chance) ou Air (Agilité). Détecté d'après ton équipement.">?</span></span>
+        <div class="dmx-element"></div></div>
     </div>
     <nav class="dmx-tabs">
       <button data-tab="conseils">Conseils</button>
@@ -55,6 +65,7 @@
       <input type="search" placeholder="Monstre ou objet…" aria-label="Rechercher dans le bestiaire">
     </div>
     <div class="dmx-body"></div>
+    <div class="dmx-tooltip" role="tooltip" hidden></div>
     <div class="dmx-footer">
       <span class="dmx-sync-status"></span>
       <button class="dmx-sync">Mettre à jour</button>
@@ -72,6 +83,29 @@
     true
   );
 
+  const tooltip = panel.querySelector(".dmx-tooltip");
+  function showTip(target) {
+    tooltip.textContent = target.dataset.tip;
+    tooltip.hidden = false;
+    const p = panel.getBoundingClientRect();
+    const t = target.getBoundingClientRect();
+    const left = Math.min(Math.max(8, t.left - p.left - tooltip.offsetWidth / 2), p.width - tooltip.offsetWidth - 8);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${t.bottom - p.top + 6}px`;
+  }
+  panel.addEventListener("mouseover", (e) => {
+    const target = e.target.closest("[data-tip]");
+    if (target) showTip(target);
+  });
+  panel.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-tip]")) tooltip.hidden = true;
+  });
+  panel.addEventListener("focusin", (e) => {
+    const target = e.target.closest("[data-tip]");
+    if (target) showTip(target);
+  });
+  panel.addEventListener("focusout", () => (tooltip.hidden = true));
+
   // Petit bouton flottant pour rouvrir le panneau quand il est fermé.
   const launcher = document.createElement("button");
   launcher.id = "dmx-launcher";
@@ -79,8 +113,16 @@
   launcher.innerHTML = ICON;
 
   const $ = (sel) => panel.querySelector(sel);
-  const classSelect = $(".dmx-class");
-  const elementSelect = $(".dmx-element");
+  const classDropdown = DMX_DROPDOWN.create($(".dmx-class"), (value) => {
+    settings.classId = value;
+    save();
+    render();
+  });
+  const elementDropdown = DMX_DROPDOWN.create($(".dmx-element"), (value) => {
+    settings.elementKey = value;
+    save();
+    render();
+  });
   const searchBox = $(".dmx-search");
   const searchInput = $(".dmx-search input");
   const body = $(".dmx-body");
@@ -127,23 +169,48 @@
     };
   }
 
+  // Couleurs des éléments, reprises des parchemins du jeu.
+  const ELEMENT_COLORS = { terre: "#b98a4a", feu: "#d9665f", eau: "#5f8fd6", air: "#5fb07a" };
+
   function fillSelects(s) {
     const classes = s.cat.classes;
-    const className = (id) => classes.find((c) => c.id === id)?.n;
-    classSelect.innerHTML = "";
-    const autoClass = className(s.detectedClass);
-    classSelect.add(new Option(autoClass ? `Auto (${autoClass})` : classes.length ? "— choisis —" : "…", ""));
-    for (const cls of classes) classSelect.add(new Option(cls.n, cls.id));
-    classSelect.value = settings.classId ?? "";
+    const classIcon = (cls) => cls?.img || (cls ? `/img/breeds/symbol_${cls.id}.png` : null);
+    const detected = classes.find((c) => c.id === s.detectedClass);
+    classDropdown.set(
+      [
+        {
+          value: null,
+          label: detected ? `${detected.n} (auto)` : classes.length ? "Choisis ta classe" : "Chargement…",
+          icon: classIcon(detected),
+          hint: detected ? "détectée" : "",
+        },
+        ...classes.map((c) => ({ value: c.id, label: c.n, icon: classIcon(c), hint: c.role || "" })),
+      ],
+      settings.classId
+    );
 
-    elementSelect.innerHTML = "";
-    const auto = s.detectedElement ? `Auto (${ELEMENTS[s.detectedElement].label})` : "Auto";
-    elementSelect.add(new Option(auto, ""));
-    for (const [key, el] of Object.entries(ELEMENTS)) elementSelect.add(new Option(el.label, key));
-    elementSelect.value = settings.elementKey || "";
+    const auto = s.detectedElement;
+    elementDropdown.set(
+      [
+        {
+          value: null,
+          label: auto ? `${ELEMENTS[auto].label} (auto)` : "Auto",
+          color: auto ? ELEMENT_COLORS[auto] : null,
+          hint: auto ? "d'après ton équipement" : "",
+        },
+        ...Object.entries(ELEMENTS).map(([key, el]) => ({
+          value: key,
+          label: el.label,
+          color: ELEMENT_COLORS[key],
+          hint: el.statLabel,
+        })),
+      ],
+      settings.elementKey
+    );
   }
 
-  // ---------- Onglet Conseils ----------
+  // Petite aide « ? » : son texte s'affiche au survol (voir l'infobulle plus bas).
+  const help = (text) => `<span class="dmx-help" tabindex="0" data-tip="${escapeHtml(text)}">?</span>`;
 
   // Libellés lisibles des stats du jeu (les autres gardent leur nom technique).
   const STAT_LABELS = {
@@ -267,21 +334,115 @@
         Survole un objet pour voir ses stats.</p>`;
   }
 
+  // Liste d'actions concrètes, dans l'ordre, avec un bouton vers la bonne page.
+  function todoSteps(s) {
+    const steps = [];
+    const c = s.character;
+    if (!c) {
+      steps.push({
+        title: "Connecte-toi au jeu",
+        text: "Le conseiller lit ton personnage : il faut être connecté, puis clique sur « Mettre à jour ».",
+      });
+      return steps;
+    }
+    if (c.pointsFree > 0 && c.rows.length) {
+      const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, settings.pointsMode, s.elementKey, settings.customPoints);
+      const summary = plan.alloc.map((a) => `+${a.gain} ${a.row.label}`).join(", ");
+      steps.push({
+        title: `Place tes ${c.pointsFree} points de caractéristique`,
+        text: summary ? `Conseillé : ${summary}. Sur la page Personnage, clique sur « + » à côté de chaque
+          caractéristique.` : "Choisis une répartition plus bas.",
+        link: ["/personnage", "Ouvrir Personnage"],
+      });
+    }
+    const upgrades = DMX_ADVISOR.gearUpgrades({
+      items: s.items,
+      slots: c.slots,
+      ownedIds: s.ownedIds,
+      level: s.level,
+      elementKey: s.elementKey,
+    });
+    for (const u of upgrades.slice(0, 3)) {
+      steps.push({
+        title: `Équipe ${u.to.n}`,
+        text: `${u.label} : ${u.from ? `à la place de ${u.from.n}` : "emplacement vide"}. Tu l'as déjà
+          dans ton inventaire (+${u.gain} pts).`,
+        link: ["/personnage", "Ouvrir Personnage"],
+      });
+    }
+    if (s.classId == null) {
+      steps.push({ title: "Choisis ta classe", text: "En haut du panneau, pour recevoir des decks de sorts." });
+    } else {
+      currentDecks = DMX_ADVISOR.buildDecks({
+        cards: Object.values(s.cat.cards),
+        classId: s.classId,
+        level: s.level,
+        elementKey: s.elementKey,
+        ownedCardIds: s.ownedCardIds,
+      });
+      if (currentDecks.length) {
+        steps.push({
+          title: `Essaie le deck « ${currentDecks[0].name} »`,
+          text: "Copie son code, puis dans Deck clique sur « Importer un code » et colle-le.",
+          deck: 0,
+          link: ["/deck", "Ouvrir Deck"],
+        });
+      }
+    }
+    if (s.level != null) {
+      steps.push({
+        title: "Va combattre des monstres de ton niveau",
+        text: "Pour gagner de l'expérience et trouver de meilleurs objets.",
+        tab: ["bestiaire", "Voir les monstres"],
+      });
+    }
+    return steps;
+  }
+
+  function renderTodo(s) {
+    return `<ol class="dmx-todo">${todoSteps(s)
+      .map((step, i) => `<li><span class="dmx-todo-num">${i + 1}</span><div>
+        <div class="dmx-todo-title">${escapeHtml(step.title)}</div>
+        <div class="dmx-dim">${escapeHtml(step.text)}</div>
+        <div class="dmx-todo-actions">
+          ${step.deck != null ? `<button class="dmx-btn-primary" data-deck="${step.deck}">Copier le code</button>` : ""}
+          ${step.link ? `<a class="dmx-btn-ghost" href="${step.link[0]}">${step.link[1]} →</a>` : ""}
+          ${step.tab ? `<button class="dmx-btn-ghost" data-go-tab="${step.tab[0]}">${step.tab[1]} →</button>` : ""}
+        </div></div></li>`)
+      .join("")}</ol>`;
+  }
+
+  function renderWelcome() {
+    if (settings.welcomed) return "";
+    return `<div class="dmx-welcome">
+      <div class="dmx-todo-title">Bienvenue ! 👋</div>
+      <p>Ce panneau lit ton personnage et te dit quoi faire pour progresser :</p>
+      <ul>
+        <li><strong>Conseils</strong> : ce que tu peux améliorer tout de suite (points, équipement).</li>
+        <li><strong>Sorts</strong> : des decks de sorts prêts à importer.</li>
+        <li><strong>Bestiaire</strong> : les monstres de ton niveau et ce qu'ils lâchent.</li>
+      </ul>
+      <p class="dmx-dim">Passe la souris sur les <span class="dmx-help">?</span> pour une explication.
+      Tu peux déplacer le panneau en tirant son titre.</p>
+      <button class="dmx-btn-primary" data-action="welcome">C'est parti</button>
+    </div>`;
+  }
+
   function renderAdvice(s) {
     const el = ELEMENTS[s.elementKey];
     const how = settings.elementKey ? "choisi" : s.detectedElement ? "auto" : "défaut";
-    return `
-      <p class="dmx-intro">Ce que tu peux améliorer tout de suite : tes points et ton équipement.</p>
+    return `${renderWelcome()}
       <div class="dmx-stats">
         <div class="dmx-stat"><div class="dmx-stat-label">Niveau</div>
           <div class="dmx-stat-value">${s.level ?? "?"}</div></div>
-        <div class="dmx-stat"><div class="dmx-stat-label">Prestige</div>
+        <div class="dmx-stat"><div class="dmx-stat-label">Prestige ${help("Chaque prestige donne des bonus permanents en combat (PA, PM, portée).")}</div>
           <div class="dmx-stat-value">${s.prestige ?? "?"}</div></div>
         <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
           <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
       </div>
-      <section><h4>Points de caractéristique</h4>${renderPoints(s)}</section>
-      <section><h4>Équipement à changer</h4>${renderGear(s)}</section>`;
+      <section><h4>À faire maintenant</h4>${renderTodo(s)}</section>
+      <section><h4>Points de caractéristique ${help(`Tu gagnes des points à chaque niveau. Plus une caractéristique est haute, plus un point coûte cher (1, puis 2, 3, 4 points). ${el.statLabel} augmente tes dégâts ${el.label}, Vitalité tes points de vie.`)}</h4>${renderPoints(s)}</section>
+      <section><h4>Équipement à changer ${help("Objets de ton inventaire qui sont meilleurs que ce que tu portes pour ton élément. « pts » = note de l'objet : plus c'est haut, mieux c'est.")}</h4>${renderGear(s)}</section>`;
   }
 
   // ---------- Onglet Sorts ----------
@@ -443,9 +604,16 @@
       b.classList.toggle("active", b.dataset.tab === settings.tab);
     }
     searchBox.hidden = settings.tab !== "bestiaire";
-    if (settings.tab === "sorts") body.innerHTML = renderSpells(s);
-    else if (settings.tab === "bestiaire") body.innerHTML = renderBestiary(s);
-    else body.innerHTML = renderAdvice(s);
+    // Une erreur dans un onglet ne doit pas figer tout le panneau.
+    try {
+      if (settings.tab === "sorts") body.innerHTML = renderSpells(s);
+      else if (settings.tab === "bestiaire") body.innerHTML = renderBestiary(s);
+      else body.innerHTML = renderAdvice(s);
+    } catch (err) {
+      console.error("[Dofus Masters Helper]", err);
+      body.innerHTML = `<p class="dmx-warn">⚠ Erreur d'affichage : ${escapeHtml(err.message)}.
+        Essaie « Mettre à jour » ; si ça persiste, clique sur « Exporter » et envoie le résultat.</p>`;
+    }
     renderStatus(s);
   }
 
@@ -473,18 +641,6 @@
 
   // ---------- Événements ----------
 
-  classSelect.addEventListener("change", () => {
-    settings.classId = classSelect.value === "" ? null : Number(classSelect.value);
-    save();
-    render();
-  });
-
-  elementSelect.addEventListener("change", () => {
-    settings.elementKey = elementSelect.value || null;
-    save();
-    render();
-  });
-
   for (const b of panel.querySelectorAll(".dmx-tabs button")) {
     b.addEventListener("click", () => {
       settings.tab = b.dataset.tab;
@@ -506,6 +662,19 @@
       } catch {
         window.prompt("Copie ce code puis colle-le dans Deck → Importer un code :", code);
       }
+      return;
+    }
+    if (e.target.closest("[data-action=welcome]")) {
+      settings.welcomed = true;
+      save();
+      render();
+      return;
+    }
+    const goTab = e.target.closest("[data-go-tab]")?.dataset.goTab;
+    if (goTab) {
+      settings.tab = goTab;
+      save();
+      render();
       return;
     }
     const mode = e.target.closest("[data-mode]")?.dataset.mode;
@@ -590,23 +759,64 @@
     button.disabled = false;
   });
 
-  // Déplacement du panneau en le tirant par son en-tête.
-  $(".dmx-header").addEventListener("mousedown", (e) => {
-    if (e.target.closest("button")) return;
+  // Déplacement : on tire l'en-tête (souris ou doigt). La position est retenue
+  // et gardée dans l'écran ; double-clic sur l'en-tête pour revenir à la place d'origine.
+  function placePanel() {
+    if (!settings.pos) {
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.style.right = "";
+      return;
+    }
+    const maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - 60);
+    panel.style.left = `${Math.min(Math.max(0, settings.pos.left), maxLeft)}px`;
+    panel.style.top = `${Math.min(Math.max(0, settings.pos.top), maxTop)}px`;
+    panel.style.right = "auto";
+  }
+
+  const header = $(".dmx-header");
+  header.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button")) return;
     const rect = panel.getBoundingClientRect();
     const dx = e.clientX - rect.left;
     const dy = e.clientY - rect.top;
+    header.setPointerCapture(e.pointerId);
+    panel.classList.add("dmx-dragging");
     const move = (ev) => {
-      panel.style.left = `${ev.clientX - dx}px`;
-      panel.style.top = `${ev.clientY - dy}px`;
-      panel.style.right = "auto";
+      settings.pos = { left: ev.clientX - dx, top: ev.clientY - dy };
+      placePanel();
     };
     const up = () => {
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", up);
+      header.removeEventListener("pointermove", move);
+      header.removeEventListener("pointerup", up);
+      header.removeEventListener("pointercancel", up);
+      panel.classList.remove("dmx-dragging");
+      save();
     };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", up);
+    header.addEventListener("pointermove", move);
+    header.addEventListener("pointerup", up);
+    header.addEventListener("pointercancel", up);
+  });
+  header.addEventListener("dblclick", (e) => {
+    if (e.target.closest("button")) return;
+    settings.pos = null;
+    placePanel();
+    save();
+  });
+  window.addEventListener("resize", placePanel);
+
+  // Replier / déplier : le panneau se réduit à son en-tête.
+  function applyCollapsed() {
+    panel.classList.toggle("dmx-collapsed", settings.collapsed);
+    const button = $(".dmx-collapse");
+    button.setAttribute("aria-expanded", String(!settings.collapsed));
+    button.title = button.ariaLabel = settings.collapsed ? "Déplier" : "Replier";
+  }
+  $(".dmx-collapse").addEventListener("click", () => {
+    settings.collapsed = !settings.collapsed;
+    applyCollapsed();
+    save();
   });
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -654,6 +864,8 @@
     render();
     applyVisibility();
     document.body.append(panel, launcher);
+    applyCollapsed();
+    placePanel();
     scan();
     sync(false);
   })();

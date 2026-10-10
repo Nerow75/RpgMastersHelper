@@ -9,6 +9,9 @@ L'extension ne fait que **lire** : elle ne clique, n'équipe et ne modifie rien 
 
 ## Ce que fait le panneau
 
+- **À faire maintenant** : la liste des actions à faire, dans l'ordre (placer tes points,
+  équiper un meilleur objet, importer un deck…), chacune avec un bouton vers la bonne page.
+  Les « ? » expliquent les termes du jeu au survol.
 - **Conseils**
   - niveau, prestige, classe et élément de ton build détectés automatiquement
     (classe et élément modifiables à la main) ;
@@ -44,8 +47,10 @@ obtenus sont aussi lus quand tu ouvres **Ma collection**.
 4. Clique sur **Charger l'extension non empaquetée** et sélectionne le dossier du projet
    (celui qui contient `manifest.json`).
 5. Va sur https://rpgmasters.houk.fr/, connecte-toi : le panneau apparaît à droite.
-   Clique sur l'icône de l'extension pour l'afficher / le masquer, tire son en-tête pour
-   le déplacer.
+   - **Déplacer** : tire son titre (sa position est retenue) ; double-clic sur le titre pour
+     le remettre à sa place.
+   - **Replier** : bouton ⌃ (il ne reste que le titre) ; **fermer** : bouton ×, puis le
+     bouton rond en bas à droite (ou l'icône de l'extension) pour le rouvrir.
 
 Après chaque mise à jour des fichiers, clique sur ↻ sur la carte de l'extension dans
 `chrome://extensions`, puis recharge la page du jeu.
@@ -58,6 +63,7 @@ Après chaque mise à jour des fichiers, clique sur ↻ sur la carte de l'extens
 | `src/game.js` | Lecture des pages du jeu (données Next.js, page Ma collection) |
 | `src/catalog.js` | Synchronisation et mise en cache des données du jeu |
 | `src/advisor.js` | Calcul des conseils (points, équipement, sorts) |
+| `src/dropdown.js` | Menus déroulants aux couleurs du site |
 | `src/overlay.js` | Panneau affiché dans la page |
 | `src/overlay.css` | Style du panneau |
 | `src/background.js` | Clic sur l'icône de l'extension |

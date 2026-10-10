@@ -89,7 +89,7 @@ var DMX_CATALOG = (() => {
     };
     const classes = classBlock?.classes ?? DMX_GAME.findFields(values, ["classes"]).classes;
     if (Array.isArray(classes)) {
-      catalog.classes = classes.map(({ id, n, role, passive }) => ({ id, n, role, passive }));
+      catalog.classes = classes.map(({ id, n, img, role, passive }) => ({ id, n, img, role, passive }));
       for (const cls of classes) for (const card of cls.cards || []) catalog.cards[card.id] = card;
     }
     addItems(catalog.character.slots.map((s) => s.item).filter(Boolean));
