@@ -38,5 +38,74 @@ var DMX_GAME = (() => {
     return items;
   }
 
-  return { readLevel, readCollection };
+  // Le serveur Next.js glisse les données de la page dans des scripts
+  // `self.__next_f.push([1, "..."])`. Mis bout à bout, ces morceaux forment un texte
+  // "Flight" : une ligne par bloc, au format `id:JSON`.
+  function flightFromHtml(html) {
+    let text = "";
+    for (const m of html.matchAll(/self\.__next_f\.push\((\[[\s\S]*?\])\)<\/script>/g)) {
+      try {
+        const chunk = JSON.parse(m[1]);
+        if (typeof chunk[1] === "string") text += chunk[1];
+      } catch {
+        // Morceau qui n'est pas du JSON pur : ignoré.
+      }
+    }
+    return text;
+  }
+
+  function parseFlight(text) {
+    const values = [];
+    for (const line of text.split("\n")) {
+      const m = line.match(/^[0-9a-f]+:([[{"].*)$/);
+      if (!m) continue;
+      try {
+        values.push(JSON.parse(m[1]));
+      } catch {
+        // Ligne de texte brut ou tronquée : ignorée.
+      }
+    }
+    return values;
+  }
+
+  // Cherche les listes d'enregistrements (objets, monstres, sorts...) : des tableaux
+  // d'objets qui ont un nom. On ne suppose rien d'autre sur leur forme.
+  function findRecordLists(value, path = "", found = []) {
+    if (Array.isArray(value)) {
+      const records = value.filter((v) => v && typeof v === "object" && !Array.isArray(v));
+      if (records.length >= 3 && records.filter((r) => "name" in r || "nom" in r).length >= 3) {
+        found.push({ path, count: value.length, records });
+        return found;
+      }
+      value.forEach((v, i) => findRecordLists(v, `${path}[${i}]`, found));
+    } else if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) findRecordLists(v, path ? `${path}.${k}` : k, found);
+    }
+    return found;
+  }
+
+  // Noms de champs présents dans les données (sans les valeurs), pour s'y retrouver
+  // quand aucune liste n'a été reconnue.
+  function collectKeys(value, keys = new Set()) {
+    if (Array.isArray(value)) value.forEach((v) => collectKeys(v, keys));
+    else if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) {
+        keys.add(k);
+        collectKeys(v, keys);
+      }
+    }
+    return keys;
+  }
+
+  // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
+  async function fetchPageData(url) {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (res.redirected && new URL(res.url).pathname.startsWith("/connexion")) {
+      throw new Error("non connecté");
+    }
+    const values = parseFlight(flightFromHtml(await res.text()));
+    return { values, lists: values.flatMap((v) => findRecordLists(v)) };
+  }
+
+  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecordLists, collectKeys, fetchPageData };
 })();
