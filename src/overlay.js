@@ -38,7 +38,7 @@
     <div class="dmx-header">
       <span class="dmx-header-icon">${ICON}</span>
       <div class="dmx-header-text">
-        <div class="dmx-kicker">Dofus Masters Helper</div>
+        <div class="dmx-kicker">RpgMasters Helper</div>
         <div class="dmx-title">Conseiller</div>
       </div>
       <button class="dmx-collapse dmx-icon-btn" title="Replier" aria-label="Replier" aria-expanded="true">
@@ -110,7 +110,7 @@
   // Petit bouton flottant pour rouvrir le panneau quand il est fermé.
   const launcher = document.createElement("button");
   launcher.id = "dmx-launcher";
-  launcher.title = "Ouvrir le conseiller Dofus Masters";
+  launcher.title = "Ouvrir le conseiller RpgMasters";
   launcher.innerHTML = ICON;
 
   const $ = (sel) => panel.querySelector(sel);
@@ -478,18 +478,68 @@
     </div>`;
   }
 
-  function renderAdvice(s) {
+  // Énergie estimée maintenant : le jeu donne la valeur à la lecture, le moment du prochain
+  // point et l'intervalle entre deux points ; on ajoute les points regagnés depuis.
+  function energyNow(e) {
+    if (!e) return null;
+    const max = e.max ?? Infinity;
+    let { value, nextAt } = e;
+    const now = Date.now();
+    if (value < max && nextAt && e.periodMs && now >= nextAt) {
+      const gained = 1 + Math.floor((now - nextAt) / e.periodMs);
+      value = Math.min(max, value + gained);
+      nextAt += gained * e.periodMs;
+    }
+    return { value, max: e.max, nextIn: value < max && nextAt ? Math.max(0, nextAt - now) : null };
+  }
+
+  const formatKamas = (k) => new Intl.NumberFormat("fr-FR").format(k);
+
+  function formatDelay(ms) {
+    const minutes = Math.ceil(ms / 60000);
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+  }
+
+  // Carte du personnage : classe, nom, niveau, prestige, puis kamas, énergie et élément.
+  function renderProfile(s) {
+    const c = s.character;
     const el = ELEMENTS[s.elementKey];
     const how = settings.elementKey ? "choisi" : s.detectedElement ? "auto" : "défaut";
-    return `${renderWelcome()}
+    const cls = s.cat.classes.find((x) => x.id === s.classId);
+    const icon = cls ? cls.img || `/img/breeds/symbol_${cls.id}.png` : null;
+    const details = [
+      cls?.n,
+      s.level != null ? `Niv. ${s.level}` : null,
+      s.prestige ? `Prestige ${s.prestige}` : null,
+    ].filter(Boolean);
+    const energy = energyNow(c?.energy);
+    const pct = energy?.max ? Math.round((100 * energy.value) / energy.max) : null;
+    return `<div class="dmx-profile">
+        <span class="dmx-profile-icon">${icon ? `<img src="${escapeHtml(icon)}" alt="">` : ""}</span>
+        <div class="dmx-profile-text">
+          <div class="dmx-profile-name">${escapeHtml(c?.name || "Ton personnage")}</div>
+          <div class="dmx-dim">${escapeHtml(details.join(" · ") || "Connecte-toi pour voir ton personnage")}
+            ${s.prestige ? help("Chaque prestige donne des bonus permanents en combat (PA, PM, portée).") : ""}</div>
+        </div>
+      </div>
       <div class="dmx-stats">
-        <div class="dmx-stat"><div class="dmx-stat-label">Niveau</div>
-          <div class="dmx-stat-value">${s.level ?? "?"}</div></div>
-        <div class="dmx-stat"><div class="dmx-stat-label">Prestige ${help("Chaque prestige donne des bonus permanents en combat (PA, PM, portée).")}</div>
-          <div class="dmx-stat-value">${s.prestige ?? "?"}</div></div>
+        <div class="dmx-stat"><div class="dmx-stat-label">Kamas</div>
+          <div class="dmx-stat-value dmx-kamas">${c?.kamas != null ? formatKamas(c.kamas) : "?"}</div></div>
+        <div class="dmx-stat"><div class="dmx-stat-label">Énergie ${help("Chaque combat consomme de l'énergie ; elle se recharge toute seule avec le temps.")}</div>
+          <div class="dmx-stat-value">${energy ? `${energy.value}${energy.max ? `<small>/${energy.max}</small>` : ""}` : "?"}</div>
+          ${pct != null ? `<div class="dmx-energy-bar"><span style="width:${pct}%"></span></div>` : ""}
+          ${energy?.nextIn != null ? `<div class="dmx-stat-sub">+1 dans ${formatDelay(energy.nextIn)}</div>`
+            : energy && energy.max && energy.value >= energy.max ? `<div class="dmx-stat-sub">pleine</div>` : ""}</div>
         <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
           <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
-      </div>
+      </div>`;
+  }
+
+  function renderAdvice(s) {
+    const el = ELEMENTS[s.elementKey];
+    return `${renderWelcome()}
+      ${renderProfile(s)}
       <section><h4>À faire maintenant</h4>${renderTodo(s)}</section>
       <section><h4>Points de caractéristique ${help(`Tu gagnes des points à chaque niveau. Plus une caractéristique est haute, plus un point coûte cher (1, puis 2, 3, 4 points). ${el.statLabel} augmente tes dégâts ${el.label}, Vitalité tes points de vie.`)}</h4>${renderPoints(s)}</section>
       <section><h4>Équipement à changer ${help("Objets de ton inventaire qui sont meilleurs que ce que tu portes pour ton élément. « pts » = note de l'objet : plus c'est haut, mieux c'est.")}</h4>${renderGear(s)}</section>`;
@@ -655,6 +705,7 @@
       b.classList.toggle("active", b.dataset.tab === settings.tab);
     }
     searchBox.hidden = settings.tab !== "bestiaire";
+    const scroll = body.scrollTop;
     const focused = body.contains(document.activeElement) ? document.activeElement.dataset?.stat : null;
     const caret = focused ? document.activeElement.selectionStart : null;
     // Une erreur dans un onglet ne doit pas figer tout le panneau.
@@ -663,10 +714,11 @@
       else if (settings.tab === "bestiaire") body.innerHTML = renderBestiary(s);
       else body.innerHTML = renderAdvice(s);
     } catch (err) {
-      console.error("[Dofus Masters Helper]", err);
+      console.error("[RpgMasters Helper]", err);
       body.innerHTML = `<p class="dmx-warn">⚠ Erreur d'affichage : ${escapeHtml(err.message)}.
         Essaie « Tout relire » ; si ça persiste, clique sur « Exporter » et envoie le résultat.</p>`;
     }
+    body.scrollTop = scroll;
     if (focused) {
       const input = body.querySelector(`input[data-stat="${CSS.escape(focused)}"]`);
       input?.focus();
@@ -732,9 +784,12 @@
     true
   );
 
-  // Rafraîchit le « il y a … » de la barre d'état.
+  // L'énergie et le « il y a … » évoluent avec le temps : on les redessine toutes les 30 s
+  // (sauf pendant une saisie dans le panneau).
   setInterval(() => {
-    if (settings.visible && !document.hidden) renderStatus(state());
+    if (!settings.visible || settings.collapsed || document.hidden) return;
+    if (settings.tab === "conseils" && !panel.contains(document.activeElement)) render();
+    else renderStatus(state());
   }, 30000);
 
   function applyVisibility() {

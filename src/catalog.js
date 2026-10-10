@@ -87,6 +87,9 @@ var DMX_CATALOG = (() => {
       rows: Array.isArray(fields.rows) ? fields.rows : [],
       pointsFree: typeof fields.pointsFree === "number" ? fields.pointsFree : null,
       level: typeof profile?.level === "number" ? profile.level : null,
+      name: typeof profile?.name === "string" ? profile.name : null,
+      kamas: typeof profile?.kamas === "number" ? profile.kamas : null,
+      energy: readEnergy(profile?.energy),
       prestige: typeof fields.prestige === "number" ? fields.prestige : null,
       classId: typeof current === "number" ? current : current?.id ?? null,
       inventoryIds: inventory.map((i) => i.id),
@@ -101,6 +104,21 @@ var DMX_CATALOG = (() => {
     // La page Deck donne la classe de façon sûre (breedId) ; sinon, celle de la fiche.
     catalog.character.classId = catalog.character.deck?.classId ?? catalog.character.classId;
     catalog.characterAt = Date.now();
+  }
+
+  // Énergie du menu profil : { value, max, nextAt, periodSec }. `nextAt` = moment du prochain
+  // point d'énergie (date ISO ou horodatage) ; `periodSec` = secondes entre deux points.
+  function readEnergy(energy) {
+    if (!energy || typeof energy.value !== "number") return null;
+    let nextAt = null;
+    if (typeof energy.nextAt === "number") nextAt = energy.nextAt < 1e12 ? energy.nextAt * 1000 : energy.nextAt;
+    else if (typeof energy.nextAt === "string") nextAt = Date.parse(energy.nextAt) || null;
+    return {
+      value: energy.value,
+      max: typeof energy.max === "number" ? energy.max : null,
+      nextAt,
+      periodMs: typeof energy.periodSec === "number" ? energy.periodSec * 1000 : null,
+    };
   }
 
   // Page Deck : props du composant DeckBuilder { collection, initialDecks, initialActive,

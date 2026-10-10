@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Dofus Masters Helper",
-  "version": "0.6.0",
-  "description": "Recommandations de caractéristiques, d'équipement et de decks de sorts pour Dofus Masters.",
+  "name": "RpgMasters Helper",
+  "version": "0.7.0",
+  "description": "Recommandations de caractéristiques, d'équipement et de decks de sorts pour RpgMasters.",
   "permissions": [
     "storage"
   ],
@@ -10,7 +10,7 @@
     "service_worker": "src/background.js"
   },
   "action": {
-    "default_title": "Afficher / masquer le panneau Dofus Masters Helper",
+    "default_title": "Afficher / masquer le panneau RpgMasters Helper",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

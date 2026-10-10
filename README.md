@@ -1,6 +1,6 @@
-# Dofus Masters Helper
+# RpgMasters Helper
 
-Extension de navigateur non officielle pour **[Dofus Masters / RpgMasters](https://rpgmasters.houk.fr/)**.
+Extension de navigateur non officielle pour **[RpgMasters](https://rpgmasters.houk.fr/)**.
 Elle ajoute au site un panneau « Conseiller » qui aide les joueurs, et en particulier les
 débutants, à progresser : où placer leurs points de caractéristique, quels objets de leur
 inventaire équiper, quels decks de sorts utiliser et quels monstres combattre.
@@ -42,8 +42,9 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
   de la Chasse ou avancer dans l'Aventure), chacune avec un lien vers la page du jeu concernée.
   Les étapes **se cochent d'elles-mêmes** une fois réalisées ; celles qui ne peuvent pas être
   détectées (les combats) se cochent à la main, pour la journée.
-- **Profil détecté automatiquement** : niveau, prestige, classe et élément du build (déduit de
-  l'équipement porté). Classe et élément restent modifiables.
+- **Carte du personnage** : nom, classe, niveau, prestige, kamas et énergie (avec le temps
+  restant avant le prochain point), plus l'élément du build, déduit de l'équipement porté.
+  Classe et élément restent modifiables.
 - **Points de caractéristique**, selon quatre stratégies au choix :
   - *Recommandé* : chaque point est placé là où il rapporte le plus, en tenant compte des
     **paliers de coût réels** du jeu (la stat de l'élément tant qu'elle est bon marché, puis la
@@ -139,7 +140,7 @@ des composants dans le HTML, sous forme de fragments `self.__next_f.push([1, "�
 | `/bestiaire?onglet=objets&n=5000` | objets et statistiques | au plus 1 fois / 24 h |
 | `/collection?onglet=objets&n=5000` | objets, possession | au plus 1 fois / 24 h |
 | `/collection?onglet=sorts` | sorts | au plus 1 fois / 24 h |
-| `/personnage` | niveau, prestige, classe, équipement, inventaire, caractéristiques, points libres | après une action du joueur (voir ci-dessous) |
+| `/personnage` | nom, niveau, prestige, kamas, énergie, classe, équipement, inventaire, caractéristiques, points libres | après une action du joueur (voir ci-dessous) |
 | `/deck` | sorts utilisables, deck actif, taille d'un deck, classe | avec `/personnage` |
 
 Le **catalogue** (quatre premières lignes) n'est relu qu'au chargement d'une page du jeu, s'il
@@ -185,7 +186,7 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
 | Champs abrégés `n`, `lvl`, `s`, `r`, `icon`, `st`, `setName`, `w` (objets) | Objets et équipement |
 | Champs `monsters` (`gfx`, `race`, `lo`, `hi`, `z`, `d`) et `zones` | Bestiaire |
 | Champs `card` / `cards` (`ap`, `eff`, `cls`, `lvl`, `icon`) | Sorts et decks |
-| Props du menu profil (`level`, `kamas`) | Niveau |
+| Props du menu profil (`name`, `level`, `kamas`, `energy` : `value`, `max`, `nextAt`, `periodSec`) | Nom, niveau, kamas, énergie |
 | Props du composant Deck (`collection` `{ key, card }`, `initialDecks`, `initialActive`, `breedId`, `deckSize`) | Sorts utilisables, deck actif, classe, taille des decks |
 | Bloc `{ classes, current }` de `/personnage` | Classe actuelle (si la page Deck est illisible) |
 | Champs `slots`, `inventory`, `rows` (`base`, `tiers`), `pointsFree`, `prestige` | Fiche personnage |
@@ -238,7 +239,7 @@ exactement ceux chargés par le navigateur.
 1. Charger le dossier comme extension non empaquetée (voir [Installation](#installation)).
 2. Modifier les fichiers, puis ↻ sur la carte de l'extension et recharger la page du jeu.
 3. Les erreurs d'affichage sont signalées dans le panneau et détaillées dans la console de la
-   page (préfixe `[Dofus Masters Helper]`).
+   page (préfixe `[RpgMasters Helper]`).
 
 Pendant le développement, l'extension a été testée avec Playwright et Chromium sur des copies
 des pages du site (HTML, feuilles de style, polices et images réels) et des données au format
