@@ -155,6 +155,10 @@
     }
 
     const detectedClass = character?.classId ?? null;
+    // Code de l'équipement porté fourni par le site, transformable en code « équipe X à la
+    // place de Y » si l'extension sait le reproduire à l'identique (voir DMX_GAME.gearCodeTemplate).
+    const wornCode = (character?.gearCodes || []).find((c) => c.key === "worn") || character?.gearCodes?.[0];
+    const gearTemplate = wornCode ? DMX_GAME.gearCodeTemplate(wornCode.code, equipped.map((i) => i.id)) : null;
     return {
       cat,
       character,
@@ -168,6 +172,7 @@
       ownedIds,
       ownedCardIds: cat.ownedCardIds.length ? new Set(cat.ownedCardIds) : null,
       // Page Deck du jeu : sorts utilisables, deck actif, taille d'un deck.
+      gearTemplate,
       usableCardIds: character?.deck?.usableCardIds?.length ? new Set(character.deck.usableCardIds) : null,
       activeDeckIds: character?.deck?.activeDeckIds || [],
       deckSize: character?.deck?.size || DMX_ADVISOR.DECK_SIZE,
@@ -329,7 +334,12 @@
       return `<div class="dmx-callout">✔ Tu portes déjà ce que tu as de mieux pour un build
         ${ELEMENTS[s.elementKey].label}.</div>`;
     }
-    return upgrades
+    const allCode = gearCodeFor(s, upgrades);
+    const replaceable = upgrades.filter((u) => u.from).length;
+    const equipAll = allCode
+      ? `<div class="dmx-todo-actions"><button class="dmx-btn-primary" data-gear-code="${escapeHtml(allCode)}">
+          Tout équiper (${replaceable})</button></div>` : "";
+    return equipAll + upgrades
       .map((u) => `<div class="dmx-slot"><div class="dmx-slot-label">${escapeHtml(u.label)}
           <span class="dmx-chip dmx-chip-up">+${u.gain} pts</span></div>
         ${u.from ? itemHtml(u.from, `retire · niv. ${u.from.lvl}`) : `<p class="dmx-dim">Emplacement vide</p>`}
@@ -357,6 +367,13 @@
 
   // Liste d'actions concrètes, dans l'ordre. Chaque étape a une clé stable : quand une étape
   // disparaît après une relecture du personnage, c'est qu'elle a été faite (voir renderTodo).
+  // Code d'équipement qui applique ces améliorations, ou null si impossible.
+  function gearCodeFor(s, upgrades) {
+    if (!s.gearTemplate) return null;
+    const replacements = upgrades.filter((u) => u.from).map((u) => [u.from.id, u.to.id]);
+    return replacements.length ? DMX_GAME.gearCodeWith(s.gearTemplate, replacements) : null;
+  }
+
   function todoSteps(s) {
     const steps = [];
     const c = s.character;
@@ -394,6 +411,7 @@
         text: `${u.label} : ${u.from ? `à la place de ${u.from.n}` : "emplacement vide"}. Tu l'as déjà
           dans ton inventaire (+${u.gain} pts).`,
         doneTitle: `${u.to.n} équipé`,
+        gearCode: gearCodeFor(s, [u]),
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
@@ -448,6 +466,7 @@
         <div class="dmx-dim">${escapeHtml(step.text)}</div>
         <div class="dmx-todo-actions">
           ${step.deck != null ? `<button class="dmx-btn-primary" data-deck="${step.deck}">Copier le code</button>` : ""}
+          ${step.gearCode ? `<button class="dmx-btn-primary" data-gear-code="${escapeHtml(step.gearCode)}">Équiper</button>` : ""}
           ${step.link ? `<a class="dmx-btn-ghost" href="${step.link[0]}">${step.link[1]} →</a>` : ""}
           ${(step.links || []).map(([href, label]) => `<a class="dmx-btn-ghost" href="${href}">${label} →</a>`).join("")}
           ${step.manual ? `<button class="dmx-btn-ghost" data-done="${step.key}">✓ C'est fait</button>` : ""}
@@ -731,6 +750,64 @@
     renderStatus(s);
   }
 
+  // ---------- Bouton « Équiper » ----------
+  // On ne déclenche aucune action du jeu : on ouvre la page Personnage avec le code déjà collé
+  // dans son champ « Codes d'équipement ». Le joueur clique sur « Importer », le jeu demande
+  // confirmation et équipe les objets qu'il possède.
+  const PENDING_GEAR_KEY = "dmx-pending-gear-code";
+
+  function queueGearCode(code) {
+    try {
+      sessionStorage.setItem(PENDING_GEAR_KEY, JSON.stringify({ code, at: Date.now() }));
+    } catch {
+      return window.prompt("Colle ce code dans Personnage → Codes d'équipement :", code);
+    }
+    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
+    else location.assign("/personnage");
+  }
+
+  function gearCodeInput() {
+    return [...document.querySelectorAll("main input")].find((i) =>
+      /code d.équipement/i.test(i.getAttribute("aria-label") || "") || /DM-E-/.test(i.placeholder || "")
+    );
+  }
+
+  function toast(message) {
+    const el = document.createElement("div");
+    el.className = "dmx-toast";
+    el.textContent = message;
+    document.body.append(el);
+    setTimeout(() => el.remove(), 7000);
+  }
+
+  function fillPendingGearCode() {
+    let pending = null;
+    try {
+      pending = JSON.parse(sessionStorage.getItem(PENDING_GEAR_KEY) || "null");
+    } catch {
+      // Stockage indisponible : rien à remplir.
+    }
+    if (!pending || Date.now() - pending.at > 2 * 60 * 1000) return;
+    const startedAt = Date.now();
+    const tryFill = () => {
+      const input = gearCodeInput();
+      if (!input) {
+        if (Date.now() - startedAt < 15000) setTimeout(tryFill, 300);
+        else toast("Champ « Codes d'équipement » introuvable : colle le code à la main.");
+        return;
+      }
+      sessionStorage.removeItem(PENDING_GEAR_KEY);
+      // Champ géré par React : on passe par le setter natif puis un événement « input ».
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, pending.code);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.scrollIntoView({ block: "center", behavior: "smooth" });
+      input.classList.add("dmx-highlight");
+      setTimeout(() => input.classList.remove("dmx-highlight"), 6000);
+      toast("Code d'équipement collé ✓ Clique sur « Importer » pour équiper.");
+    };
+    tryFill();
+  }
+
   // ---------- Mise à jour automatique du personnage ----------
   // Pas besoin de bouton : la fiche et le deck sont relus quand le joueur change de page,
   // revient sur l'onglet, ou clique sur un bouton des pages Personnage / Deck / Inventaire.
@@ -768,6 +845,7 @@
     if (location.href === lastUrl) return;
     lastUrl = location.href;
     refreshCharacterSoon(800);
+    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
   }, 700);
 
   document.addEventListener("visibilitychange", () => {
@@ -845,6 +923,11 @@
       render();
       return;
     }
+    const gearCode = e.target.closest("[data-gear-code]")?.dataset.gearCode;
+    if (gearCode) {
+      queueGearCode(gearCode);
+      return;
+    }
     const doneKey = e.target.closest("[data-done]")?.dataset.done;
     if (doneKey) {
       settings.doneToday = { ...settings.doneToday, [doneKey]: today() };
@@ -894,7 +977,7 @@
 
   // Export d'un échantillon des données de chaque page, pour faire évoluer l'extension.
   const EXPORT_PAGES = ["/bestiaire", "/bestiaire?onglet=objets", "/collection?onglet=sorts", "/personnage"];
-  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "inventory", "current", "prestige", "presets", "zones"];
+  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "inventory", "choices", "current", "prestige", "presets", "zones"];
   const truncate = (value) => {
     const json = JSON.stringify(Array.isArray(value) ? value.slice(0, 3) : value);
     return json.length > 3000 ? json.slice(0, 3000) + "…" : JSON.parse(json);
@@ -921,6 +1004,23 @@
         report[url] = `erreur : ${err.message}`;
       }
     }
+    // Diagnostic : ce que l'extension a compris des données (sans rien d'identifiant).
+    const st = state();
+    report.diagnostic = {
+      objetsConnus: st.items.length,
+      objetsInventaire: st.character?.inventoryIds?.length ?? null,
+      objetsPortes: (st.character?.slots || []).filter((x) => x.item).length,
+      sortsConnus: Object.keys(st.cat.cards).length,
+      sortsUtilisables: st.character?.deck?.usableCardIds?.length ?? null,
+      deckActif: st.character?.deck?.activeDeckIds?.length ?? null,
+      monstres: st.cat.monsters.length,
+      niveau: st.level,
+      classe: st.classId,
+      energieLue: !!st.character?.energy,
+      codesEquipement: (st.character?.gearCodes || []).length,
+      codeEquipementReconnu: !!st.gearTemplate,
+      pagesEnErreur: st.cat.syncErrors || [],
+    };
     out.value = JSON.stringify(report, null, 1);
     out.hidden = false;
     out.select();
@@ -1040,6 +1140,7 @@
     document.body.append(panel, launcher);
     applyCollapsed();
     placePanel();
+    if (location.pathname.startsWith("/personnage")) fillPendingGearCode();
     scan();
     sync(false);
   })();

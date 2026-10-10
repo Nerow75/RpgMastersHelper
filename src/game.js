@@ -137,15 +137,9 @@ var DMX_GAME = (() => {
     bytes.push(v);
   }
 
-  function deckCode(classId, cardIds) {
-    const ids = [...new Set(cardIds.map((id) => Math.floor(Number(id))))]
-      .filter((id) => Number.isInteger(id) && id > 0 && id <= MAX_CARD_ID)
-      .slice(0, 30);
-    const bytes = [2];
-    pushVarint(bytes, classId);
-    pushVarint(bytes, ids.length);
-    for (const id of ids) pushVarint(bytes, id);
-
+  // Encode des octets au format des codes du jeu : `${prefix}${base32}-${contrôle}`.
+  // `salt` = premier octet du contrôle FNV-1a (83, « S », pour les decks).
+  function encodeCode(prefix, bytes, salt) {
     let body = "";
     let buffer = 0;
     let bits = 0;
@@ -156,13 +150,106 @@ var DMX_GAME = (() => {
       buffer &= (1 << bits) - 1;
     }
     if (bits > 0) body += CODE_ALPHABET[(buffer << (5 - bits)) & 31];
+    return `${prefix}${body}-${codeCheck(bytes, salt)}`;
+  }
 
+  function codeCheck(bytes, salt) {
     let hash = 0x811c9dc5;
-    for (const byte of [83, ...bytes]) hash = Math.imul(hash ^ byte, 0x1000193) >>> 0;
+    for (const byte of [salt, ...bytes]) hash = Math.imul(hash ^ byte, 0x1000193) >>> 0;
     const top = hash >>> 12;
     let check = "";
     for (let i = 3; i >= 0; i--) check += CODE_ALPHABET[(top >>> (5 * i)) & 31];
-    return `DM-S-${body}-${check}`;
+    return check;
+  }
+
+  // Opération inverse : `${prefix}${base32}-${contrôle}` -> { bytes, check }, ou null.
+  function decodeCode(prefix, code) {
+    const m = String(code).trim().toUpperCase().match(/^(.*)-([0-9A-Z]{4})$/);
+    if (!m || !m[1].startsWith(prefix)) return null;
+    const bytes = [];
+    let buffer = 0;
+    let bits = 0;
+    for (const ch of m[1].slice(prefix.length)) {
+      const v = CODE_ALPHABET.indexOf(ch);
+      if (v < 0) return null;
+      buffer = (buffer << 5) | v;
+      bits += 5;
+      if (bits >= 8) {
+        bytes.push((buffer >>> (bits - 8)) & 255);
+        bits -= 8;
+        buffer &= (1 << bits) - 1;
+      }
+    }
+    return { bytes, check: m[2] };
+  }
+
+  function readVarints(bytes) {
+    const values = [];
+    let value = 0;
+    let scale = 1;
+    for (const byte of bytes) {
+      value += (byte & 127) * scale;
+      if (byte & 128) scale *= 128;
+      else {
+        values.push(value);
+        value = 0;
+        scale = 1;
+      }
+    }
+    return scale === 1 ? values : null; // entier tronqué : code invalide
+  }
+
+  function writeVarints(values) {
+    const bytes = [];
+    for (const v of values) pushVarint(bytes, v);
+    return bytes;
+  }
+
+  function deckCode(classId, cardIds) {
+    const ids = [...new Set(cardIds.map((id) => Math.floor(Number(id))))]
+      .filter((id) => Number.isInteger(id) && id > 0 && id <= MAX_CARD_ID)
+      .slice(0, 30);
+    const bytes = [2];
+    pushVarint(bytes, classId);
+    pushVarint(bytes, ids.length);
+    for (const id of ids) pushVarint(bytes, id);
+    return encodeCode("DM-S-", bytes, 83);
+  }
+
+  // Codes d'équipement (« DM-E-… ») : le site fournit le code de l'équipement porté, mais
+  // pas son générateur. On le décode en une liste d'entiers ; si on sait le ré-encoder à
+  // l'identique (même contrôle) et que les objets portés y figurent, on peut remplacer
+  // un objet porté par un autre. Sinon : null, et l'extension ne propose pas de code.
+  function gearCodeTemplate(code, wornItemIds) {
+    const decoded = decodeCode("DM-E-", code);
+    if (!decoded) return null;
+    const values = readVarints(decoded.bytes);
+    if (!values) return null;
+    // Le contrôle commence par un octet fixe inconnu : on cherche celui qui redonne le code.
+    let salt = null;
+    for (let s = 0; s < 256 && salt == null; s++) if (codeCheck(decoded.bytes, s) === decoded.check) salt = s;
+    if (salt == null || encodeCode("DM-E-", writeVarints(values), salt) !== String(code).trim().toUpperCase()) {
+      return null;
+    }
+    // Chaque objet porté doit apparaître une seule fois parmi les entiers du code.
+    const positions = new Map();
+    for (const id of new Set(wornItemIds)) {
+      const at = values.flatMap((v, i) => (v === id ? [i] : []));
+      if (at.length !== 1) return null;
+      positions.set(id, at[0]);
+    }
+    return { values, salt, positions };
+  }
+
+  // Nouveau code où chaque objet porté `from` est remplacé par `to` : [[fromId, toId], ...].
+  function gearCodeWith(template, replacements) {
+    const values = [...template.values];
+    for (const [from, to] of replacements) {
+      const at = template.positions.get(from);
+      if (at == null || !Number.isInteger(to) || to <= 0) return null;
+      values[at] = to;
+    }
+    return encodeCode("DM-E-", writeVarints(values), template.salt);
   }
 
   // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
@@ -175,5 +262,5 @@ var DMX_GAME = (() => {
     return parseFlight(flightFromHtml(await res.text()));
   }
 
-  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, findObject, readHeaderLevel, deckCode, fetchPageData };
+  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, findObject, readHeaderLevel, deckCode, encodeCode, decodeCode, readVarints, writeVarints, gearCodeTemplate, gearCodeWith, fetchPageData };
 })();

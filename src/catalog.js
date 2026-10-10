@@ -71,16 +71,15 @@ var DMX_CATALOG = (() => {
 
   async function syncCharacter() {
     const values = await DMX_GAME.fetchPageData(PAGES.character);
-    const fields = DMX_GAME.findFields(values, ["slots", "rows", "pointsFree", "inventory", "prestige"]);
+    const fields = DMX_GAME.findFields(values, ["slots", "rows", "pointsFree", "inventory", "prestige", "choices"]);
     // Menu profil de la barre de navigation : { name, level, kamas, energy, ... }.
     const profile = DMX_GAME.findObject(values, ["level", "kamas"]);
     // Bloc de changement de classe : { classes, current, cost, ... } -> classe actuelle.
     const classBlock = DMX_GAME.findObject(values, ["classes", "current"]);
     const current = classBlock?.current;
 
-    const inventory = [...Object.values(DMX_GAME.findRecords(fields.inventory ?? []))]
-      .flatMap((group) => [...group.values()]);
-    addItems(inventory);
+    const inventory = readInventory(fields.inventory);
+    addItems(inventory.items);
 
     catalog.character = {
       slots: Array.isArray(fields.slots) ? fields.slots : [],
@@ -92,7 +91,11 @@ var DMX_CATALOG = (() => {
       energy: readEnergy(profile?.energy),
       prestige: typeof fields.prestige === "number" ? fields.prestige : null,
       classId: typeof current === "number" ? current : current?.id ?? null,
-      inventoryIds: inventory.map((i) => i.id),
+      inventoryIds: inventory.ids,
+      // Codes d'équipement proposés par le site (« Équipement à partager ») : { key, label, count, code }.
+      gearCodes: Array.isArray(fields.choices)
+        ? fields.choices.filter((c) => typeof c?.code === "string").map(({ key, label, count, code }) => ({ key, label, count, code }))
+        : [],
     };
     const classes = classBlock?.classes ?? DMX_GAME.findFields(values, ["classes"]).classes;
     if (Array.isArray(classes)) {
@@ -104,6 +107,28 @@ var DMX_CATALOG = (() => {
     // La page Deck donne la classe de façon sûre (breedId) ; sinon, celle de la fiche.
     catalog.character.classId = catalog.character.deck?.classId ?? catalog.character.classId;
     catalog.characterAt = Date.now();
+  }
+
+  // Inventaire : selon la page, une entrée peut être l'objet complet, { item, qty, fusion },
+  // ou seulement un identifiant ({ itemId }, { id, qty } ou un nombre). On accepte tout cela.
+  function readInventory(inventory) {
+    const ids = new Set();
+    const items = [];
+    const visit = (v) => {
+      if (typeof v === "number") return ids.add(v);
+      if (Array.isArray(v)) return v.forEach(visit);
+      if (!v || typeof v !== "object") return;
+      if (DMX_GAME.findRecords(v)[""]?.size) {
+        // L'entrée est elle-même un objet du jeu.
+        items.push(v);
+        return ids.add(v.id);
+      }
+      if (v.item && typeof v.item === "object") return visit(v.item);
+      const id = v.itemId ?? v.item_id ?? v.item ?? v.id;
+      if (Number.isInteger(id)) ids.add(id);
+    };
+    visit(inventory ?? []);
+    return { ids: [...ids], items };
   }
 
   // Énergie du menu profil : { value, max, nextAt, periodSec }. `nextAt` = moment du prochain

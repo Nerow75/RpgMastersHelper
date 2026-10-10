@@ -53,6 +53,9 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
   - *Libre* : le joueur répartit lui-même, l'extension calcule le gain exact et les points restants.
 - **Équipement à changer** : uniquement les objets **déjà présents dans l'inventaire** qui
   surpassent ceux portés, emplacement par emplacement, avec le gain estimé.
+- Boutons **« Équiper »** et **« Tout équiper »** : ouvrent la page Personnage avec un code
+  d'équipement `DM-E-…` déjà collé dans le champ « Codes d'équipement ». Le joueur clique sur
+  « Importer », le jeu demande confirmation et équipe les objets possédés.
 
 ### Sorts
 - Passif de la classe et sorts les plus rentables (dégâts moyens par PA) dans l'élément choisi.
@@ -79,8 +82,10 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 ## Principes
 
 1. **Lecture seule.** L'extension lit les pages que le joueur peut déjà consulter. Elle ne
-   clique sur rien, n'envoie aucune action de jeu et ne contourne aucune règle (par exemple,
-   elle ne permet pas de changer d'équipement en combat).
+   déclenche aucune action de jeu et ne contourne aucune règle (par exemple, elle ne permet
+   pas de changer d'équipement en combat). Pour équiper un objet ou un deck, elle prépare un
+   code au format du jeu ; c'est le joueur qui l'importe, via l'interface et les vérifications
+   du jeu.
 2. **Aucune donnée en dur.** Objets, monstres, sorts, classes, coûts des caractéristiques :
    tout est lu sur le site. Seule la *façon d'interpréter* ces données (poids des stats,
    composition des decks) est propre à l'extension.
@@ -167,6 +172,11 @@ une page échoue, les autres sont conservées et l'erreur est signalée dans le 
 - **Decks** : sorts utilisables par le personnage (liste fournie par la page Deck), classés par
   dégâts moyens par PA dans l'élément, complétés par des sorts de soutien selon le style du
   deck. Un deck est considéré comme équipé si le deck actif contient tous ses sorts.
+- **Codes d'équipement** : le générateur de code est côté serveur. L'extension décode le code
+  de l'équipement porté fourni par le site, vérifie qu'elle sait le **reproduire à l'identique**
+  (même contrôle) et que chaque objet porté y apparaît une seule fois, puis remplace l'objet
+  porté par le nouveau. Si l'une de ces vérifications échoue, aucun code n'est proposé.
+  Les emplacements vides ne peuvent pas être remplis par ce moyen.
 - **Étapes faites** : une étape qui disparaît après une relecture de la fiche (points placés,
   objet équipé, deck en place) est affichée comme faite jusqu'au rechargement de la page.
 - **Code de deck** : même encodage que le bouton « Code du deck » du site (version `2`, classe,
@@ -193,6 +203,8 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
 | Paramètre `n` des listes d'objets | Lecture du catalogue complet |
 | Chemins `/personnage`, `/deck`, `/inventaire`, `/chasse`, `/aventure` | Liens et détection des actions du joueur |
 | Format des codes de deck `DM-S-…` | Bouton de copie du deck |
+| Champ `choices` de `/personnage` (`{ key, label, count, code }`) et format des codes `DM-E-…` | Boutons « Équiper » |
+| Champ d'import « Code d'équipement à importer » de la page Personnage | Remplissage du code |
 | Images `/img/items/`, `/img/spells/sort_`, `/img/monsters/`, `/img/breeds/` | Icônes |
 | Variables CSS `--color-*`, `--font-*`, `--dm-*` | Apparence (valeurs de secours intégrées) |
 | Page « Ma collection » (libellé « Équipables par moi (niv. N…) », cartes d'objets) | Lecture de secours du niveau et des objets possédés |
@@ -209,8 +221,8 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
   session ; les requêtes utilisent la session du navigateur comme une navigation normale.
 - **Stockage local** (`chrome.storage.local`) : catalogue du jeu, fiche du personnage et
   préférences d'affichage, effaçables en désinstallant l'extension.
-- Le bouton **Exporter** (pied du panneau) produit un échantillon de la structure des données,
-  utile au diagnostic. Il n'est envoyé nulle part : le joueur choisit de le copier ou non.
+- Le bouton **Exporter** (pied du panneau) produit un échantillon de la structure des données
+  et un diagnostic (nombre d'objets, de sorts, etc. compris par l'extension). Il n'est envoyé nulle part : le joueur choisit de le copier ou non.
 
 ---
 
