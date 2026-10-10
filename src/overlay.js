@@ -14,12 +14,25 @@
   let syncError = null;
   let syncing = false;
 
+  // Icône « livre » au même trait que celles du site.
+  const ICON = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v15H5.5A1.5 1.5 0 0 0 4 19.5Z"></path>
+    <path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H20M9 8h6M9 12h4"></path></svg>`;
+
   const panel = document.createElement("div");
   panel.id = "dmx-panel";
   panel.innerHTML = `
     <div class="dmx-header">
-      <span>Dofus Masters Helper</span>
-      <button class="dmx-close" title="Masquer">×</button>
+      <span class="dmx-header-icon">${ICON}</span>
+      <div class="dmx-header-text">
+        <div class="dmx-kicker">Dofus Masters Helper</div>
+        <div class="dmx-title">Conseiller</div>
+      </div>
+      <button class="dmx-close" title="Masquer" aria-label="Masquer">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
+          stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </button>
     </div>
     <div class="dmx-controls">
       <label>Classe <select class="dmx-class"></select></label>
@@ -41,6 +54,12 @@
       <textarea class="dmx-export-out" readonly hidden></textarea>
     </div>
   `;
+
+  // Petit bouton flottant pour rouvrir le panneau quand il est fermé.
+  const launcher = document.createElement("button");
+  launcher.id = "dmx-launcher";
+  launcher.title = "Ouvrir le conseiller Dofus Masters";
+  launcher.innerHTML = ICON;
 
   const $ = (sel) => panel.querySelector(sel);
   const classSelect = $(".dmx-class");
@@ -104,6 +123,40 @@
 
   // ---------- Onglet Conseils ----------
 
+  // Libellés lisibles des stats du jeu (les autres gardent leur nom technique).
+  const STAT_LABELS = {
+    vitalite: "Vitalité", sagesse: "Sagesse", force: "Force", intelligence: "Intelligence",
+    chance: "Chance", agilite: "Agilité", puissance: "Puissance", pa: "PA", pm: "PM", po: "Portée",
+    critique: "% Critique", dommages: "Dommages", soins: "Soins", invocations: "Invocations",
+    initiative: "Initiative", prospection: "Prospection", tacle: "Tacle", fuite: "Fuite",
+    dommagesTerre: "Dommages Terre", dommagesFeu: "Dommages Feu", dommagesEau: "Dommages Eau",
+    dommagesAir: "Dommages Air", dommagesNeutre: "Dommages Neutre",
+    resPctTerre: "% Rés. Terre", resPctFeu: "% Rés. Feu", resPctEau: "% Rés. Eau",
+    resPctAir: "% Rés. Air", resPctNeutre: "% Rés. Neutre",
+  };
+
+  function statsText(st = {}) {
+    return Object.entries(st)
+      .map(([k, v]) => `${v > 0 ? "+" : ""}${v} ${STAT_LABELS[k] || k}`)
+      .join(" · ");
+  }
+
+  // Objet avec son icône encadrée de la couleur de sa rareté, comme dans « Ma collection ».
+  function itemHtml(item, detail) {
+    const icon = item.icon != null
+      ? `<img src="/img/items/${encodeURIComponent(item.icon)}.png" alt="" loading="lazy">` : "";
+    return `<div class="dmx-item dmx-r${Number(item.r) || 0}" title="${escapeHtml(statsText(item.st))}">
+      <span class="dmx-icon">${icon}</span>
+      <span class="dmx-item-text">
+        <span class="dmx-item-name">${escapeHtml(item.n)}</span>
+        <span class="dmx-dim">${detail}</span>
+      </span></div>`;
+  }
+
+  const scored = ({ item, score }) => itemHtml(item, `niv. ${item.lvl} · ${score} pts`);
+
+  // ---------- Onglet Conseils ----------
+
   function renderPoints(s) {
     const c = s.character;
     if (!c || !c.rows.length || c.pointsFree == null) {
@@ -112,24 +165,21 @@
     const el = ELEMENTS[s.elementKey];
     if (c.pointsFree === 0) return `<p>Aucun point libre : tout est déjà placé.</p>`;
     const advice = DMX_ADVISOR.pointsAdvice(c.rows, c.pointsFree, s.elementKey);
-    let html = `<p>Tu as <strong>${c.pointsFree}</strong> points libres.</p>`;
+    let html = "";
     if (advice.main) {
       const m = advice.main;
-      html += `<p>➜ Mets-les en <strong>${el.statLabel}</strong> : <strong>+${m.gain}</strong>
-        (base ${m.row.base} → ${m.newBase})${m.left ? `, il en restera ${m.left}` : ""}.</p>`;
+      html += `<div class="dmx-callout">Mets tes <strong>${c.pointsFree}</strong> points en
+        <strong>${el.statLabel}</strong> : <strong>+${m.gain}</strong>
+        <span class="dmx-dim">(base ${m.row.base} → ${m.newBase}${m.left ? `, reste ${m.left}` : ""})</span></div>`;
     }
     if (advice.vitalite) {
       html += `<p class="dmx-dim">En Vitalité, ce serait +${advice.vitalite.gain} PV.</p>`;
     }
     for (const row of advice.wasted) {
-      html += `<p class="dmx-dim">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
+      html += `<p class="dmx-warn">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
         build ${el.label}.</p>`;
     }
     return html;
-  }
-
-  function itemLine({ item, score }) {
-    return `${escapeHtml(item.n)} <span class="dmx-dim">niv. ${item.lvl} · ${score} pts</span>`;
   }
 
   function renderGear(s) {
@@ -143,42 +193,54 @@
     });
     const html = rows
       .map((r) => {
-        const worn = r.worn.length ? r.worn.map(itemLine).join("<br>") : `<span class="dmx-dim">vide</span>`;
+        const worn = r.worn.length ? r.worn.map(scored).join("") : `<p class="dmx-empty">Emplacement vide</p>`;
         const owned = r.owned.length
-          ? `<div class="dmx-up">✔ Tu as mieux : ${r.owned.map(itemLine).join(", ")}</div>`
+          ? `<span class="dmx-chip dmx-chip-up">✔ Tu as mieux</span>${r.owned.map(scored).join("")}`
           : "";
         const target = r.target.length
-          ? `<div class="dmx-target">★ À viser : ${r.target.slice(0, 2).map(itemLine).join(", ")}</div>`
+          ? `<span class="dmx-chip dmx-chip-target">★ À viser</span>${r.target.slice(0, 2).map(scored).join("")}`
           : "";
-        return `<tr><th>${escapeHtml(r.label)}</th><td>${worn}${owned}${target}</td></tr>`;
+        return `<div class="dmx-slot"><div class="dmx-slot-label">${escapeHtml(r.label)}</div>
+          ${worn}${owned}${target}</div>`;
       })
       .join("");
     const notes = [];
     if (s.level == null) notes.push("niveau inconnu : ouvre « Ma collection » pour le lire");
     if (!s.ownedIds) notes.push("objets possédés inconnus : ouvre « Ma collection »");
-    return `<table class="dmx-slots">${html}</table>
+    return `${html}
       <p class="dmx-dim">Score = valeur estimée des stats pour un build ${ELEMENTS[s.elementKey].label}.
-      ${notes.length ? `<br>⚠ ${notes.join(" ; ")}.` : ""}</p>`;
+      Survole un objet pour voir ses stats.</p>
+      ${notes.length ? `<p class="dmx-warn">⚠ ${notes.join(" ; ")}.</p>` : ""}`;
   }
 
   function renderAdvice(s) {
     const el = ELEMENTS[s.elementKey];
-    const how = settings.elementKey ? "choisi" : s.detectedElement ? "détecté d'après ton équipement" : "par défaut";
+    const how = settings.elementKey ? "choisi" : s.detectedElement ? "auto" : "défaut";
+    const free = s.character?.pointsFree;
     return `
-      <section><h4>Ton personnage</h4>
-        <p>${s.level != null ? `Niveau <strong>${s.level}</strong>` : "Niveau inconnu"} ·
-        Élément <strong>${el.label}</strong> <span class="dmx-dim">(${how})</span></p></section>
+      <div class="dmx-stats">
+        <div class="dmx-stat"><div class="dmx-stat-label">Niveau</div>
+          <div class="dmx-stat-value">${s.level ?? "?"}</div></div>
+        <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
+          <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
+        <div class="dmx-stat"><div class="dmx-stat-label">Points libres</div>
+          <div class="dmx-stat-value">${free ?? "?"}</div></div>
+      </div>
       <section><h4>Points de caractéristique</h4>${renderPoints(s)}</section>
       <section><h4>Équipement</h4>${renderGear(s)}</section>`;
   }
 
   // ---------- Onglet Sorts ----------
 
-  function cardLine({ card, owned, perAp }) {
-    const tag = owned === false ? ` <span class="dmx-tag">non obtenu</span>` : "";
-    const dmg = perAp != null ? ` · ~${Math.round(perAp)} dégâts/PA` : "";
-    return `<li title="${escapeHtml(card.d || "")}"><strong>${escapeHtml(card.n)}</strong>
-      <span class="dmx-dim">${card.ap} PA${dmg} · niv. ${card.lvl}</span>${tag}</li>`;
+  function cardHtml({ card, owned, perAp }, elementKey) {
+    const chips = [`<span class="dmx-chip">${card.ap} PA</span>`];
+    if (perAp != null) {
+      chips.push(`<span class="dmx-chip dmx-chip-el dmx-el-${elementKey}">~${Math.round(perAp)} dégâts/PA</span>`);
+    }
+    if (owned === false) chips.push(`<span class="dmx-chip">non obtenu</span>`);
+    return `<li class="dmx-row${owned === false ? " dmx-locked" : ""}">
+      <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(card.n)}</span>${chips.join("")}</div>
+      ${card.d ? `<div class="dmx-dim">${escapeHtml(card.d)}</div>` : ""}</li>`;
   }
 
   function renderSpells(s) {
@@ -194,29 +256,31 @@
     const el = ELEMENTS[s.elementKey];
     return `
       ${cls ? `<section><h4>${escapeHtml(cls.n)} · ${escapeHtml(cls.role || "")}</h4>
-        ${cls.passive ? `<p><strong>${escapeHtml(cls.passive.name)}</strong> : ${escapeHtml(cls.passive.desc)}</p>` : ""}
-        </section>` : ""}
-      <section><h4>Dégâts ${el.label} (les plus rentables par PA)</h4>
-        ${damage.length ? `<ul>${damage.slice(0, 8).map(cardLine).join("")}</ul>`
+        ${cls.passive ? `<div class="dmx-callout"><strong>${escapeHtml(cls.passive.name)}</strong> —
+          ${escapeHtml(cls.passive.desc)}</div>` : ""}</section>` : ""}
+      <section><h4>Dégâts ${el.label} · les plus rentables</h4>
+        ${damage.length ? `<ul>${damage.slice(0, 8).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
           : `<p class="dmx-empty">Aucun sort de dégâts ${el.label} connu pour cette classe.</p>`}</section>
-      <section><h4>Soutien (boucliers, soins, buffs)</h4>
-        ${support.length ? `<ul>${support.slice(0, 5).map(cardLine).join("")}</ul>`
-          : `<p class="dmx-empty">Aucun.</p>`}</section>
-      <p class="dmx-dim">Survole un sort pour lire sa description.</p>`;
+      <section><h4>Soutien · boucliers, soins, buffs</h4>
+        ${support.length ? `<ul>${support.slice(0, 5).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
+          : `<p class="dmx-empty">Aucun.</p>`}</section>`;
   }
 
   // ---------- Onglet Bestiaire ----------
-
-  function statsText(st = {}) {
-    return Object.entries(st).map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(", ");
-  }
 
   function renderBestiary(s) {
     const q = normalize(searchInput.value.trim());
     if (!s.cat.monsters.length) return `<p class="dmx-empty">Bestiaire pas encore synchronisé.</p>`;
     if (q.length < 2) {
-      return `<p class="dmx-dim">${s.cat.monsters.length} monstres et ${s.items.length} objets connus.
-        Tape au moins 2 lettres.</p>`;
+      return `<div class="dmx-stats">
+          <div class="dmx-stat"><div class="dmx-stat-label">Monstres</div>
+            <div class="dmx-stat-value">${s.cat.monsters.length}</div></div>
+          <div class="dmx-stat"><div class="dmx-stat-label">Objets</div>
+            <div class="dmx-stat-value">${s.items.length}</div></div>
+          <div class="dmx-stat"><div class="dmx-stat-label">Zones</div>
+            <div class="dmx-stat-value">${Object.keys(s.cat.zones).length}</div></div>
+        </div>
+        <p class="dmx-dim" style="margin-top:10px">Tape au moins 2 lettres pour chercher.</p>`;
     }
     const zoneName = (id) => {
       const z = s.cat.zones[id];
@@ -227,24 +291,29 @@
     const monsterHtml = monsters
       .map((m) => {
         const drops = (m.d || [])
-          .map(([id, min]) => `${escapeHtml(s.cat.items[id]?.n || `objet ${id}`)} (${min} %)`)
-          .join(", ");
-        return `<li><strong>${escapeHtml(m.n)}</strong> <span class="dmx-dim">niv. ${m.lo}–${m.hi} ·
-          ${escapeHtml(m.race)}</span><br>Zones : ${(m.z || []).map((id) => escapeHtml(zoneName(id))).join(", ") || "?"}
-          ${drops ? `<br>Butin : ${drops}` : ""}</li>`;
+          .map(([id, min]) => {
+            const item = s.cat.items[id];
+            return item ? itemHtml(item, `${min} % · niv. ${item.lvl}`) : `<p class="dmx-dim">Objet ${id} (${min} %)</p>`;
+          })
+          .join("");
+        const zones = (m.z || []).map((id) => escapeHtml(zoneName(id))).join(", ") || "?";
+        return `<li class="dmx-row">
+          <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(m.n)}</span>
+            <span class="dmx-chip">niv. ${m.lo}–${m.hi}</span></div>
+          <div class="dmx-dim">${escapeHtml(m.race)} · ${zones}</div>${drops}</li>`;
       })
       .join("");
-    const itemHtml = items
+    const itemList = items
       .map((i) => {
         const droppers = s.cat.monsters.filter((m) => (m.d || []).some(([id]) => id === i.id));
-        return `<li><strong>${escapeHtml(i.n)}</strong> <span class="dmx-dim">${escapeHtml(i.s || "")} ·
-          niv. ${i.lvl}</span><br>${escapeHtml(statsText(i.st))}
-          ${droppers.length ? `<br>Lâché par : ${droppers.slice(0, 5).map((m) => escapeHtml(m.n)).join(", ")}` : ""}</li>`;
+        return `<li class="dmx-row">${itemHtml(i, `${escapeHtml(i.s || "")} · niv. ${i.lvl}`)}
+          <div class="dmx-dim">${escapeHtml(statsText(i.st))}</div>
+          ${droppers.length ? `<div class="dmx-dim">Lâché par : ${droppers.slice(0, 5).map((m) => escapeHtml(m.n)).join(", ")}</div>` : ""}</li>`;
       })
       .join("");
     return `
       <section><h4>Monstres</h4>${monsterHtml ? `<ul>${monsterHtml}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>
-      <section><h4>Objets</h4>${itemHtml ? `<ul>${itemHtml}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>`;
+      <section><h4>Objets</h4>${itemList ? `<ul>${itemList}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>`;
   }
 
   // ---------- Rendu général ----------
@@ -277,6 +346,7 @@
 
   function applyVisibility() {
     panel.style.display = settings.visible ? "" : "none";
+    launcher.style.display = settings.visible ? "none" : "";
   }
 
   function save() {
@@ -324,6 +394,12 @@
   });
 
   $(".dmx-sync").addEventListener("click", () => sync(true));
+
+  launcher.addEventListener("click", () => {
+    settings.visible = true;
+    applyVisibility();
+    save();
+  });
 
   $(".dmx-close").addEventListener("click", () => {
     settings.visible = false;
@@ -423,7 +499,7 @@
   // on relit la page à chaque modification, en ignorant celles de notre propre panneau.
   let scanTimer = null;
   new MutationObserver((mutations) => {
-    if (mutations.every((m) => panel.contains(m.target))) return;
+    if (mutations.every((m) => panel.contains(m.target) || m.target === launcher)) return;
     clearTimeout(scanTimer);
     scanTimer = setTimeout(scan, 300);
   }).observe(document.body, { childList: true, subtree: true });
@@ -435,7 +511,7 @@
     await DMX_CATALOG.load();
     render();
     applyVisibility();
-    document.body.appendChild(panel);
+    document.body.append(panel, launcher);
     scan();
     sync(false);
   })();

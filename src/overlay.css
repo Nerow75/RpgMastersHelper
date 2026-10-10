@@ -1,203 +1,464 @@
+/* Panneau aux couleurs du site : on réutilise ses variables (--color-*, --font-*, --dm-*)
+   pour suivre ses changements de thème, avec ses valeurs actuelles en secours. */
+
+#dmx-panel,
+#dmx-launcher {
+  --dmx-night: var(--color-night, #120f0b);
+  --dmx-bark: var(--color-bark, #1a1510);
+  --dmx-panel: var(--color-panel, #241d15);
+  --dmx-panel-2: var(--color-panel-2, #2e251a);
+  --dmx-line: var(--color-line, #3e3327);
+  --dmx-line-2: var(--color-line-2, #574830);
+  --dmx-parchment: var(--color-parchment, #f5ead2);
+  --dmx-muted: var(--color-muted, #c2b395);
+  --dmx-dim: var(--color-dim, #9c8d71);
+  --dmx-gold: var(--color-gold, #e4b955);
+  --dmx-gold-light: var(--color-gold-light, #f1d698);
+  --dmx-leaf: var(--color-leaf, #94c052);
+  --dmx-ember: var(--color-ember, #db7150);
+  --dmx-ac: var(--dm-ac-gold, #d4b46a);
+  --dmx-display: var(--font-display, "Fredoka", ui-rounded, system-ui, sans-serif);
+  --dmx-sans: var(--font-sans, "Nunito", ui-sans-serif, system-ui, sans-serif);
+  --dmx-hl: inset 0 1px 0 #ffeecd12;
+  --dmx-shadow-1: 0 1px 2px #00000059;
+  --dmx-shadow-3: 0 2px 6px #00000059, 0 22px 48px -12px #0009;
+  --dmx-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
 #dmx-panel {
   position: fixed;
-  top: 80px;
+  top: 120px; /* sous l'en-tête et la barre d'annonces du site */
   right: 16px;
   z-index: 2147483647;
-  width: 340px;
-  max-height: 80vh;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  /* Laisse la place que le site réserve à son bouton « Chat » et à sa barre mobile. */
+  max-height: calc(100vh - 136px - var(--dm-chat-reserve, 4.75rem) - var(--dm-nav-offset, 0px));
   display: flex;
   flex-direction: column;
-  background: rgba(28, 24, 18, 0.95);
-  color: #f2e6cf;
-  border: 1px solid #d68c28;
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  font: 13px/1.4 system-ui, sans-serif;
+  overflow: hidden;
+  color: var(--dmx-parchment);
+  font: 14px/1.45 var(--dmx-sans);
+  background: radial-gradient(120% 90px at 50% 0%, #ffe2aa0d, transparent 70%),
+    linear-gradient(180deg, var(--dmx-panel-2), var(--dmx-panel) 75%);
+  border: 1px solid var(--dmx-line);
+  border-radius: 1rem;
+  box-shadow: var(--dmx-hl), var(--dmx-shadow-3);
 }
+
+#dmx-panel *,
+#dmx-panel *::before,
+#dmx-panel *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- En-tête ---------- */
 
 #dmx-panel .dmx-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px 10px;
-  background: #d68c28;
-  color: #1c1812;
-  font-weight: 700;
+  gap: 10px;
+  padding: 12px 12px 10px;
   cursor: move;
-  border-radius: 7px 7px 0 0;
   user-select: none;
 }
 
-#dmx-panel .dmx-close {
-  background: none;
-  border: none;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  color: inherit;
+#dmx-panel .dmx-header-icon,
+#dmx-launcher {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--dmx-ac);
+  background: color-mix(in srgb, var(--dmx-ac) 10%, #00000059);
+  border: 1px solid color-mix(in srgb, var(--dmx-ac) 28%, transparent);
+  box-shadow: inset 0 1px #ffffff0d, 0 2px 6px #0000004d;
 }
+
+#dmx-panel .dmx-header-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 0.75rem;
+}
+
+#dmx-panel .dmx-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#dmx-panel .dmx-kicker,
+#dmx-panel h4 {
+  margin: 0;
+  font-family: var(--dmx-display);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dmx-ac);
+}
+
+#dmx-panel .dmx-title {
+  font-family: var(--dmx-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-shadow: 0 1px #00000059;
+}
+
+#dmx-panel .dmx-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--dmx-muted);
+  background: linear-gradient(#ffeecd13, #ffeecd06);
+  border: 1px solid var(--dmx-line-2);
+  box-shadow: var(--dmx-hl), var(--dmx-shadow-1);
+}
+
+#dmx-panel .dmx-close:hover {
+  color: var(--dmx-parchment);
+  border-color: color-mix(in srgb, var(--dmx-gold) 60%, transparent);
+}
+
+/* ---------- Sélecteurs ---------- */
 
 #dmx-panel .dmx-controls {
   display: flex;
   gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(214, 140, 40, 0.4);
+  padding: 0 12px 10px;
 }
 
 #dmx-panel .dmx-controls label {
   display: flex;
   flex-direction: column;
   flex: 1;
-  font-size: 11px;
-  opacity: 0.85;
-}
-
-#dmx-panel select {
-  margin-top: 2px;
-  padding: 3px;
-  background: #2e281f;
-  color: #f2e6cf;
-  border: 1px solid #6b5333;
-  border-radius: 4px;
-}
-
-#dmx-panel .dmx-body {
-  overflow-y: auto;
-  padding: 4px 10px 10px;
-}
-
-#dmx-panel h4 {
-  margin: 10px 0 4px;
-  color: #f0a840;
-  font-size: 12px;
+  min-width: 0;
+  gap: 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--dmx-dim);
 }
 
-#dmx-panel p,
-#dmx-panel ul {
-  margin: 0;
-}
-
-#dmx-panel ul {
-  padding-left: 18px;
-}
-
-#dmx-panel .dmx-deck {
-  margin-bottom: 6px;
-}
-
-#dmx-panel .dmx-empty {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-#dmx-panel .dmx-dim {
-  opacity: 0.65;
-  font-size: 11px;
-}
-
-#dmx-panel .dmx-slots {
+#dmx-panel select,
+#dmx-panel input[type="search"] {
   width: 100%;
-  border-collapse: collapse;
-  font: inherit;
+  padding: 0.4rem 0.6rem;
+  font: 600 0.85rem var(--dmx-sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--dmx-parchment);
+  background-color: var(--dmx-bark);
+  border: 1px solid var(--dmx-line-2);
+  border-radius: 0.75rem;
+  outline: none;
+  box-shadow: inset 0 1px 3px #00000059;
 }
 
-#dmx-panel .dmx-slots th {
-  text-align: left;
-  vertical-align: top;
-  padding: 2px 8px 2px 0;
-  font-weight: 600;
-  white-space: nowrap;
-  color: #e8cfa0;
+#dmx-panel select:focus,
+#dmx-panel input[type="search"]:focus {
+  border-color: var(--dmx-gold);
+  box-shadow: 0 0 0 2px var(--dmx-night), 0 0 0 4px var(--dmx-gold);
 }
 
-#dmx-panel .dmx-slots td {
-  padding: 2px 0;
-}
+/* ---------- Onglets (comme les onglets de la collection) ---------- */
 
 #dmx-panel .dmx-tabs {
   display: flex;
-  border-bottom: 1px solid rgba(214, 140, 40, 0.4);
+  gap: 6px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--dmx-line);
 }
 
-#dmx-panel .dmx-tabs button {
+#dmx-panel .dmx-tabs button,
+#dmx-panel .dmx-footer button {
   flex: 1;
-  padding: 6px 0;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: inherit;
-  font: inherit;
-  opacity: 0.7;
+  padding: 0.4rem 0.6rem;
+  font: 700 0.85rem var(--dmx-display);
+  letter-spacing: 0.015em;
+  color: var(--dmx-parchment);
   cursor: pointer;
+  border: 1px solid var(--dmx-line-2);
+  border-radius: 0.75rem;
+  background: linear-gradient(#ffeecd13, #ffeecd06);
+  box-shadow: var(--dmx-hl), var(--dmx-shadow-1);
+  transition: transform 0.14s var(--dmx-ease), border-color 0.15s, filter 0.15s;
+}
+
+#dmx-panel .dmx-tabs button:hover,
+#dmx-panel .dmx-footer button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--dmx-gold) 60%, transparent);
 }
 
 #dmx-panel .dmx-tabs button.active {
-  opacity: 1;
-  border-bottom-color: #d68c28;
-  color: #f0a840;
-  font-weight: 700;
+  color: #132008;
+  text-shadow: 0 1px #ffffff26;
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dmx-leaf) 88%, #fff) 0%,
+    var(--dmx-leaf) 45%,
+    color-mix(in srgb, var(--dmx-leaf) 82%, #000) 100%
+  );
+  box-shadow: inset 0 1px #ffffff40, 0 2px #43611f, 0 4px 10px -4px #0006;
 }
 
 #dmx-panel .dmx-search {
-  padding: 8px 10px 0;
+  padding: 10px 12px 0;
 }
 
-#dmx-panel .dmx-search input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 4px 6px;
-  background: #2e281f;
-  color: #f2e6cf;
-  border: 1px solid #6b5333;
-  border-radius: 4px;
-  font: inherit;
+/* ---------- Contenu ---------- */
+
+#dmx-panel .dmx-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dmx-line-2) transparent;
 }
 
-#dmx-panel .dmx-body li {
+#dmx-panel section {
+  margin-top: 12px;
+}
+
+#dmx-panel h4 {
+  margin-bottom: 6px;
+}
+
+#dmx-panel p {
+  margin: 0 0 4px;
+}
+
+#dmx-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#dmx-panel strong {
+  color: var(--dmx-gold-light);
+}
+
+#dmx-panel .dmx-dim {
+  color: var(--dmx-dim);
+  font-size: 0.78rem;
+}
+
+#dmx-panel .dmx-empty {
+  color: var(--dmx-dim);
+  font-style: italic;
+}
+
+#dmx-panel .dmx-warn {
+  color: var(--dmx-ember);
+  font-size: 0.78rem;
+}
+
+/* Tuiles de stats (comme « Équipements obtenus » sur la collection). */
+#dmx-panel .dmx-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+#dmx-panel .dmx-stat {
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  background: #0000003d;
+  border: 1px solid color-mix(in srgb, var(--dmx-ac) 14%, var(--dmx-line));
+  border-radius: 0.8rem;
+  box-shadow: inset 0 1px #ffffff0a;
+}
+
+#dmx-panel .dmx-stat-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dmx-dim);
+}
+
+#dmx-panel .dmx-stat-value {
+  font: 700 1.1rem var(--dmx-display);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Couleurs des éléments, reprises des parchemins du jeu. */
+#dmx-panel .dmx-el-terre { --el: #b98a4a; }
+#dmx-panel .dmx-el-feu { --el: #d9665f; }
+#dmx-panel .dmx-el-eau { --el: #5f8fd6; }
+#dmx-panel .dmx-el-air { --el: #5fb07a; }
+
+#dmx-panel .dmx-stat-value[class*="dmx-el-"] {
+  color: color-mix(in srgb, var(--el) 75%, #fff);
+}
+
+/* Conseil principal (points) mis en avant. */
+#dmx-panel .dmx-callout {
+  padding: 0.55rem 0.7rem;
+  margin: 6px 0;
+  border: 1px solid color-mix(in srgb, var(--dmx-leaf) 35%, var(--dmx-line));
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dmx-leaf) 10%, transparent), transparent 60%);
+}
+
+/* ---------- Objets ---------- */
+
+#dmx-panel .dmx-slot {
+  padding: 8px 0;
+  border-top: 1px solid var(--dmx-line);
+}
+
+#dmx-panel .dmx-slot:first-of-type {
+  border-top: none;
+}
+
+#dmx-panel .dmx-slot-label {
   margin-bottom: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dmx-dim);
 }
 
-#dmx-panel .dmx-up {
-  color: #8fd18b;
+#dmx-panel .dmx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 3px 0;
 }
 
-#dmx-panel .dmx-target {
-  color: #f0c060;
+#dmx-panel .dmx-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 0.6rem;
+  border: 1.5px solid color-mix(in srgb, var(--rc) 65%, transparent);
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--rc) 45%, transparent), transparent 70%),
+    var(--dmx-bark);
 }
 
-#dmx-panel .dmx-tag {
-  font-size: 10px;
-  padding: 0 4px;
-  border: 1px solid #6b5333;
-  border-radius: 3px;
-  opacity: 0.8;
+#dmx-panel .dmx-icon img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px #0008);
 }
+
+#dmx-panel .dmx-item-text {
+  min-width: 0;
+  flex: 1;
+  line-height: 1.25;
+}
+
+#dmx-panel .dmx-item-name {
+  display: block;
+  font-weight: 700;
+  color: var(--rc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Raretés : mêmes couleurs que le jeu (Commun → Légendaire). */
+#dmx-panel .dmx-r0 { --rc: var(--color-r0, #a3a7ad); }
+#dmx-panel .dmx-r1 { --rc: var(--color-r1, #72c690); }
+#dmx-panel .dmx-r2 { --rc: var(--color-r2, #7aaae4); }
+#dmx-panel .dmx-r3 { --rc: var(--color-r3, #b796dc); }
+#dmx-panel .dmx-r4 { --rc: var(--color-r4, #e69a62); }
+#dmx-panel .dmx-r5 { --rc: var(--color-r5, #e6c552); }
+
+/* Puces (comme les filtres de la collection). */
+#dmx-panel .dmx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--dmx-muted);
+  background-color: #ffeecd0e;
+  border: 1px solid var(--dmx-line-2);
+  border-radius: 999px;
+  box-shadow: inset 0 1px #ffeecd0a;
+}
+
+#dmx-panel .dmx-chip-up {
+  color: var(--dmx-leaf);
+  border-color: color-mix(in srgb, var(--dmx-leaf) 45%, transparent);
+}
+
+#dmx-panel .dmx-chip-target {
+  color: var(--dmx-gold);
+  border-color: color-mix(in srgb, var(--dmx-gold) 45%, transparent);
+}
+
+#dmx-panel .dmx-chip-el {
+  color: color-mix(in srgb, var(--el) 70%, #fff);
+  border-color: color-mix(in srgb, var(--el) 55%, transparent);
+}
+
+/* ---------- Sorts et bestiaire ---------- */
+
+#dmx-panel .dmx-row {
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  border: 1px solid color-mix(in srgb, var(--dmx-ac) 16%, var(--dmx-line));
+  border-radius: 0.8rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dmx-ac) 5%, transparent), transparent 50%),
+    linear-gradient(180deg, var(--dmx-panel-2), var(--dmx-panel));
+  box-shadow: inset 0 1px #ffffff0a;
+}
+
+#dmx-panel .dmx-row-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#dmx-panel .dmx-row-title {
+  font-family: var(--dmx-display);
+  font-weight: 700;
+}
+
+#dmx-panel .dmx-row.dmx-locked {
+  opacity: 0.6;
+}
+
+/* ---------- Pied ---------- */
 
 #dmx-panel .dmx-footer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  border-top: 1px solid rgba(214, 140, 40, 0.4);
-  font-size: 11px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--dmx-line);
+  background: #0000002e;
+  font-size: 0.72rem;
 }
 
 #dmx-panel .dmx-sync-status {
-  flex: 1;
-  opacity: 0.75;
+  flex: 1 1 100%;
+  color: var(--dmx-dim);
 }
 
 #dmx-panel .dmx-footer button {
-  padding: 3px 6px;
-  background: #2e281f;
-  color: #f2e6cf;
-  border: 1px solid #6b5333;
-  border-radius: 4px;
-  cursor: pointer;
-  font: inherit;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
 }
 
 #dmx-panel .dmx-footer button:disabled {
@@ -208,8 +469,36 @@
 #dmx-panel .dmx-export-out {
   width: 100%;
   height: 120px;
-  box-sizing: border-box;
-  background: #15120d;
-  color: #f2e6cf;
-  font: 11px/1.3 monospace;
+  color: var(--dmx-parchment);
+  background: var(--dmx-bark);
+  border: 1px solid var(--dmx-line-2);
+  border-radius: 0.5rem;
+  font: 11px/1.3 ui-monospace, monospace;
+}
+
+/* ---------- Bouton flottant quand le panneau est fermé ---------- */
+
+#dmx-launcher {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--dm-nav-offset, 0px) + var(--dm-chat-reserve, 0px) + 16px);
+  z-index: 2147483646;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 0.9rem;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--dmx-ac) 14%, var(--dmx-panel));
+  transition: transform 0.14s var(--dmx-ease);
+}
+
+#dmx-launcher:hover {
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dmx-panel .dmx-tabs button,
+  #dmx-launcher {
+    transition: none;
+  }
 }
