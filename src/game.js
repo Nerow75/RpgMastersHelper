@@ -68,33 +68,37 @@ var DMX_GAME = (() => {
     return values;
   }
 
-  // Cherche les listes d'enregistrements (objets, monstres, sorts...) : des tableaux
-  // d'objets qui ont un nom. On ne suppose rien d'autre sur leur forme.
-  function findRecordLists(value, path = "", found = []) {
-    if (Array.isArray(value)) {
-      const records = value.filter((v) => v && typeof v === "object" && !Array.isArray(v));
-      if (records.length >= 3 && records.filter((r) => "name" in r || "nom" in r).length >= 3) {
-        found.push({ path, count: value.length, records });
-        return found;
-      }
-      value.forEach((v, i) => findRecordLists(v, `${path}[${i}]`, found));
-    } else if (value && typeof value === "object") {
-      for (const [k, v] of Object.entries(value)) findRecordLists(v, path ? `${path}.${k}` : k, found);
-    }
-    return found;
+  // Le jeu abrège ses champs : `n` = nom, `lvl` = niveau, `lo`/`hi` = fourchette de niveau
+  // (monstres), `cls` = classe (sorts). Un "enregistrement" est un objet nommé qui a l'un d'eux.
+  function isRecord(o) {
+    return typeof o.n === "string" && ("lvl" in o || "lo" in o || "cls" in o);
   }
 
-  // Noms de champs présents dans les données (sans les valeurs), pour s'y retrouver
-  // quand aucune liste n'a été reconnue.
-  function collectKeys(value, keys = new Set()) {
-    if (Array.isArray(value)) value.forEach((v) => collectKeys(v, keys));
+  // Regroupe les enregistrements trouvés selon le champ qui les contient (item, monsters, cards...),
+  // sans doublon (même id).
+  function findRecords(value, key = "", groups = {}) {
+    if (Array.isArray(value)) {
+      value.forEach((v) => findRecords(v, key, groups));
+    } else if (value && typeof value === "object") {
+      if (isRecord(value)) {
+        const group = (groups[key] ??= new Map());
+        group.set(value.id ?? `${value.n}:${group.size}`, value);
+      }
+      for (const [k, v] of Object.entries(value)) findRecords(v, k, groups);
+    }
+    return groups;
+  }
+
+  // Première valeur trouvée pour chacun des champs demandés.
+  function findFields(value, wanted, found = {}) {
+    if (Array.isArray(value)) value.forEach((v) => findFields(v, wanted, found));
     else if (value && typeof value === "object") {
       for (const [k, v] of Object.entries(value)) {
-        keys.add(k);
-        collectKeys(v, keys);
+        if (wanted.includes(k) && !(k in found)) found[k] = v;
+        findFields(v, wanted, found);
       }
     }
-    return keys;
+    return found;
   }
 
   // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
@@ -103,9 +107,8 @@ var DMX_GAME = (() => {
     if (res.redirected && new URL(res.url).pathname.startsWith("/connexion")) {
       throw new Error("non connecté");
     }
-    const values = parseFlight(flightFromHtml(await res.text()));
-    return { values, lists: values.flatMap((v) => findRecordLists(v)) };
+    return parseFlight(flightFromHtml(await res.text()));
   }
 
-  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecordLists, collectKeys, fetchPageData };
+  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, fetchPageData };
 })();

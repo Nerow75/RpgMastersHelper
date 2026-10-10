@@ -169,9 +169,20 @@
     "/personnage",
   ];
   const SAMPLE_SIZE = 3;
-  const MAX_RECORD_CHARS = 2000;
+  const MAX_SAMPLE_CHARS = 3000;
+  // Champs (hors listes nommées) utiles pour les recommandations : caractéristiques,
+  // équipement porté, presets, classes, filtres du bestiaire...
+  const EXPORT_FIELDS = [
+    "rows", "pointsFree", "equipped", "slots", "presets", "classes",
+    "zones", "statOptions", "typeCounts", "butin", "lache",
+  ];
 
-  // Récupère quelques enregistrements de chaque liste trouvée sur ces pages,
+  function truncate(value) {
+    const json = JSON.stringify(Array.isArray(value) ? value.slice(0, SAMPLE_SIZE) : value);
+    return json.length > MAX_SAMPLE_CHARS ? json.slice(0, MAX_SAMPLE_CHARS) + "…" : JSON.parse(json);
+  }
+
+  // Récupère quelques exemples de chaque type de donnée trouvé sur ces pages,
   // pour pouvoir écrire ensuite un lecteur adapté à leur format.
   panel.querySelector(".dmx-export").addEventListener("click", async (e) => {
     const button = e.currentTarget;
@@ -181,21 +192,16 @@
     const report = {};
     for (const url of EXPORT_PAGES) {
       try {
-        const { values, lists } = await DMX_GAME.fetchPageData(url);
-        if (!lists.length) {
-          const keys = new Set();
-          values.forEach((v) => DMX_GAME.collectKeys(v, keys));
-          report[url] = { aucuneListe: true, champs: [...keys].slice(0, 300) };
-          continue;
+        const values = await DMX_GAME.fetchPageData(url);
+        const records = {};
+        for (const [key, group] of Object.entries(DMX_GAME.findRecords(values))) {
+          records[key] = { count: group.size, sample: truncate([...group.values()]) };
         }
-        report[url] = lists.map((l) => ({
-          path: l.path,
-          count: l.count,
-          sample: l.records.slice(0, SAMPLE_SIZE).map((r) => {
-            const json = JSON.stringify(r);
-            return json.length > MAX_RECORD_CHARS ? json.slice(0, MAX_RECORD_CHARS) + "…" : r;
-          }),
-        }));
+        const fields = {};
+        for (const [key, value] of Object.entries(DMX_GAME.findFields(values, EXPORT_FIELDS))) {
+          fields[key] = truncate(value);
+        }
+        report[url] = { records, fields };
       } catch (err) {
         report[url] = `erreur : ${err.message}`;
       }
