@@ -8,10 +8,18 @@
   const STORAGE_KEY = "dmx-settings-v2";
   const PROFILE_KEY = "dmx-profile";
   // classId / elementKey à null = détection automatique.
-  let settings = { classId: null, elementKey: null, tab: "conseils", visible: true };
+  let settings = {
+    classId: null,
+    elementKey: null,
+    tab: "conseils",
+    visible: true,
+    pointsMode: "optimal", // optimal | element | vitalite | libre
+    customPoints: {}, // mode libre : { clé de stat: points }
+  };
   // Lu sur la page "Ma collection" : niveau + objets affichés (obtenus ou non), par nom.
   let profile = { level: null, items: {} };
   let syncError = null;
+  let currentDecks = []; // decks affichés dans l'onglet Sorts
   let syncing = false;
 
   // Icône « livre » au même trait que celles du site.
@@ -55,6 +63,15 @@
     </div>
   `;
 
+  // Image introuvable (icône absente du site) : on la masque plutôt qu'une icône cassée.
+  panel.addEventListener(
+    "error",
+    (e) => {
+      if (e.target.tagName === "IMG") e.target.style.visibility = "hidden";
+    },
+    true
+  );
+
   // Petit bouton flottant pour rouvrir le panneau quand il est fermé.
   const launcher = document.createElement("button");
   launcher.id = "dmx-launcher";
@@ -84,24 +101,27 @@
     const equipped = (character?.slots || []).map((s) => s.item).filter(Boolean);
     const detectedElement = DMX_ADVISOR.detectElement(equipped);
 
-    let ownedIds = null;
+    // Objets possédés : inventaire de la fiche perso, objets portés, et collection si ouverte.
+    const ownedIds = new Set([...(character?.inventoryIds || []), ...cat.ownedItemIds]);
+    for (const item of equipped) ownedIds.add(item.id);
     const ownedNames = new Set(
       Object.values(profile.items).filter((i) => i.owned).map((i) => i.name)
     );
-    if (cat.ownedItemIds.length || ownedNames.size) {
-      ownedIds = new Set(cat.ownedItemIds);
+    if (ownedNames.size) {
       for (const item of Object.values(cat.items)) if (ownedNames.has(item.n)) ownedIds.add(item.id);
-      for (const item of equipped) ownedIds.add(item.id);
     }
 
+    const detectedClass = character?.classId ?? null;
     return {
       cat,
       character,
-      level: profile.level,
+      level: character?.level ?? DMX_GAME.readHeaderLevel(document) ?? profile.level,
+      prestige: character?.prestige ?? null,
       items: Object.values(cat.items),
       detectedElement,
       elementKey: settings.elementKey || detectedElement || "terre",
-      classId: settings.classId ?? character?.breed ?? null,
+      detectedClass,
+      classId: settings.classId ?? detectedClass,
       ownedIds,
       ownedCardIds: cat.ownedCardIds.length ? new Set(cat.ownedCardIds) : null,
     };
@@ -109,10 +129,12 @@
 
   function fillSelects(s) {
     const classes = s.cat.classes;
+    const className = (id) => classes.find((c) => c.id === id)?.n;
     classSelect.innerHTML = "";
-    classSelect.add(new Option(classes.length ? "— choisis —" : "(synchronise)", ""));
+    const autoClass = className(s.detectedClass);
+    classSelect.add(new Option(autoClass ? `Auto (${autoClass})` : classes.length ? "— choisis —" : "…", ""));
     for (const cls of classes) classSelect.add(new Option(cls.n, cls.id));
-    classSelect.value = s.classId ?? "";
+    classSelect.value = settings.classId ?? "";
 
     elementSelect.innerHTML = "";
     const auto = s.detectedElement ? `Auto (${ELEMENTS[s.detectedElement].label})` : "Auto";
@@ -157,80 +179,115 @@
 
   // ---------- Onglet Conseils ----------
 
+  const POINT_MODES = [
+    ["optimal", "Recommandé"],
+    ["element", "Tout élément"],
+    ["vitalite", "Tout Vitalité"],
+    ["libre", "Libre"],
+  ];
+
   function renderPoints(s) {
     const c = s.character;
     if (!c || !c.rows.length || c.pointsFree == null) {
       return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
     }
-    const el = ELEMENTS[s.elementKey];
     if (c.pointsFree === 0) return `<p>Aucun point libre : tout est déjà placé.</p>`;
-    const advice = DMX_ADVISOR.pointsAdvice(c.rows, c.pointsFree, s.elementKey);
-    let html = "";
-    if (advice.main) {
-      const m = advice.main;
-      html += `<div class="dmx-callout">Mets tes <strong>${c.pointsFree}</strong> points en
-        <strong>${el.statLabel}</strong> : <strong>+${m.gain}</strong>
-        <span class="dmx-dim">(base ${m.row.base} → ${m.newBase}${m.left ? `, reste ${m.left}` : ""})</span></div>`;
+    const el = ELEMENTS[s.elementKey];
+    const mode = settings.pointsMode;
+    const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, mode, s.elementKey, settings.customPoints);
+
+    const modes = POINT_MODES.map(
+      ([key, label]) => `<button class="dmx-chip dmx-mode${key === mode ? " active" : ""}" data-mode="${key}">
+        ${key === "element" ? `Tout ${el.statLabel}` : label}</button>`
+    ).join("");
+
+    const why = {
+      optimal: `Chaque point va là où il rapporte le plus : ${el.statLabel} tant qu'elle coûte peu,
+        puis Vitalité quand ${el.statLabel} devient trop chère (paliers de coût du jeu).`,
+      element: `Maximum de dégâts ${el.label}, au détriment de la vie.`,
+      vitalite: "Maximum de points de vie, pour encaisser.",
+      libre: "Choisis toi-même combien de points mettre dans chaque caractéristique.",
+    }[mode];
+
+    let result;
+    if (mode === "libre") {
+      const requested = Object.values(settings.customPoints).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      result = `<div class="dmx-free">${c.rows
+        .map((row) => {
+          const a = plan.alloc.find((x) => x.row.key === row.key);
+          return `<label class="dmx-free-row"><span>${escapeHtml(row.label)}</span>
+            <input type="number" min="0" step="1" data-stat="${escapeHtml(row.key)}"
+              value="${Number(settings.customPoints[row.key]) || ""}" placeholder="0">
+            <span class="dmx-dim">${a ? `+${a.gain} (→ ${a.newBase})` : ""}</span></label>`;
+        })
+        .join("")}</div>
+        <p class="${requested > c.pointsFree ? "dmx-warn" : "dmx-dim"}">
+          ${requested > c.pointsFree ? `⚠ Tu demandes ${requested} points, tu n'en as que ${c.pointsFree}.`
+            : `Reste ${plan.left} point${plan.left > 1 ? "s" : ""} à placer.`}</p>`;
+    } else {
+      result = `<div class="dmx-callout">${
+        plan.alloc.length
+          ? plan.alloc
+              .map((a) => `<strong>${escapeHtml(a.row.label)}</strong> : ${a.spent} point${a.spent > 1 ? "s" : ""} →
+                <strong>+${a.gain}</strong> <span class="dmx-dim">(${a.row.base} → ${a.newBase})</span>`)
+              .join("<br>")
+          : "Rien à placer avec ces paliers."
+      }${plan.left ? `<br><span class="dmx-dim">Reste ${plan.left} point${plan.left > 1 ? "s" : ""}.</span>` : ""}</div>`;
     }
-    if (advice.vitalite) {
-      html += `<p class="dmx-dim">En Vitalité, ce serait +${advice.vitalite.gain} PV.</p>`;
-    }
-    for (const row of advice.wasted) {
-      html += `<p class="dmx-warn">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
-        build ${el.label}.</p>`;
-    }
-    return html;
+
+    const wasted = plan.wasted
+      .map((row) => `<p class="dmx-warn">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
+        build ${el.label}.</p>`)
+      .join("");
+    return `<p>Tu as <strong>${c.pointsFree}</strong> points à placer.</p>
+      <div class="dmx-modes">${modes}</div>
+      <p class="dmx-dim">${why}</p>${result}${wasted}`;
   }
 
   function renderGear(s) {
     if (!s.character?.slots.length) return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
-    const rows = DMX_ADVISOR.gearAdvice({
+    const upgrades = DMX_ADVISOR.gearUpgrades({
       items: s.items,
       slots: s.character.slots,
       ownedIds: s.ownedIds,
       level: s.level,
       elementKey: s.elementKey,
     });
-    const html = rows
-      .map((r) => {
-        const worn = r.worn.length ? r.worn.map(scored).join("") : `<p class="dmx-empty">Emplacement vide</p>`;
-        const owned = r.owned.length
-          ? `<span class="dmx-chip dmx-chip-up">✔ Tu as mieux</span>${r.owned.map(scored).join("")}`
-          : "";
-        const target = r.target.length
-          ? `<span class="dmx-chip dmx-chip-target">★ À viser</span>${r.target.slice(0, 2).map(scored).join("")}`
-          : "";
-        return `<div class="dmx-slot"><div class="dmx-slot-label">${escapeHtml(r.label)}</div>
-          ${worn}${owned}${target}</div>`;
-      })
-      .join("");
-    const notes = [];
-    if (s.level == null) notes.push("niveau inconnu : ouvre « Ma collection » pour le lire");
-    if (!s.ownedIds) notes.push("objets possédés inconnus : ouvre « Ma collection »");
-    return `${html}
-      <p class="dmx-dim">Score = valeur estimée des stats pour un build ${ELEMENTS[s.elementKey].label}.
-      Survole un objet pour voir ses stats.</p>
-      ${notes.length ? `<p class="dmx-warn">⚠ ${notes.join(" ; ")}.</p>` : ""}`;
+    if (!upgrades.length) {
+      return `<div class="dmx-callout">✔ Tu portes déjà ce que tu as de mieux pour un build
+        ${ELEMENTS[s.elementKey].label}.</div>`;
+    }
+    return upgrades
+      .map((u) => `<div class="dmx-slot"><div class="dmx-slot-label">${escapeHtml(u.label)}
+          <span class="dmx-chip dmx-chip-up">+${u.gain} pts</span></div>
+        ${u.from ? itemHtml(u.from, `retire · niv. ${u.from.lvl}`) : `<p class="dmx-dim">Emplacement vide</p>`}
+        <div class="dmx-arrow">↓ équipe</div>
+        ${itemHtml(u.to, `dans ton inventaire · niv. ${u.to.lvl}`)}</div>`)
+      .join("") + `<p class="dmx-dim">Comparaison des stats pour un build ${ELEMENTS[s.elementKey].label}.
+        Survole un objet pour voir ses stats.</p>`;
   }
 
   function renderAdvice(s) {
     const el = ELEMENTS[s.elementKey];
     const how = settings.elementKey ? "choisi" : s.detectedElement ? "auto" : "défaut";
-    const free = s.character?.pointsFree;
     return `
+      <p class="dmx-intro">Ce que tu peux améliorer tout de suite : tes points et ton équipement.</p>
       <div class="dmx-stats">
         <div class="dmx-stat"><div class="dmx-stat-label">Niveau</div>
           <div class="dmx-stat-value">${s.level ?? "?"}</div></div>
+        <div class="dmx-stat"><div class="dmx-stat-label">Prestige</div>
+          <div class="dmx-stat-value">${s.prestige ?? "?"}</div></div>
         <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
           <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
-        <div class="dmx-stat"><div class="dmx-stat-label">Points libres</div>
-          <div class="dmx-stat-value">${free ?? "?"}</div></div>
       </div>
       <section><h4>Points de caractéristique</h4>${renderPoints(s)}</section>
-      <section><h4>Équipement</h4>${renderGear(s)}</section>`;
+      <section><h4>Équipement à changer</h4>${renderGear(s)}</section>`;
   }
 
   // ---------- Onglet Sorts ----------
+
+  const spellIcon = (card) =>
+    card.icon != null ? `<img src="/img/spells/sort_${encodeURIComponent(card.icon)}.png" alt="" loading="lazy">` : "";
 
   function cardHtml({ card, owned, perAp }, elementKey) {
     const chips = [`<span class="dmx-chip">${card.ap} PA</span>`];
@@ -238,27 +295,59 @@
       chips.push(`<span class="dmx-chip dmx-chip-el dmx-el-${elementKey}">~${Math.round(perAp)} dégâts/PA</span>`);
     }
     if (owned === false) chips.push(`<span class="dmx-chip">non obtenu</span>`);
-    return `<li class="dmx-row${owned === false ? " dmx-locked" : ""}">
-      <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(card.n)}</span>${chips.join("")}</div>
-      ${card.d ? `<div class="dmx-dim">${escapeHtml(card.d)}</div>` : ""}</li>`;
+    return `<li class="dmx-row dmx-spell${owned === false ? " dmx-locked" : ""}">
+      <span class="dmx-spell-icon">${spellIcon(card)}</span>
+      <div class="dmx-spell-text">
+        <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(card.n)}</span>${chips.join("")}</div>
+        ${card.d ? `<div class="dmx-dim">${escapeHtml(card.d)}</div>` : ""}
+      </div></li>`;
+  }
+
+  // Un deck : ses 10 sorts en images, et le code à importer dans la page Deck du jeu.
+  function deckHtml(deck, s, index) {
+    const missing = deck.cards.filter((x) => x.owned === false).length;
+    const tiles = deck.cards
+      .map(({ card, owned }) => `<span class="dmx-deck-card${owned === false ? " dmx-locked" : ""}"
+        title="${escapeHtml(`${card.n} · ${card.ap} PA${card.d ? `\n${card.d}` : ""}`)}">${spellIcon(card)}</span>`)
+      .join("");
+    const names = deck.cards.map(({ card }) => escapeHtml(card.n)).join(" · ");
+    return `<div class="dmx-row dmx-deck">
+      <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(deck.name)}</span>
+        <span class="dmx-chip">${deck.cards.length}/${DMX_ADVISOR.DECK_SIZE}</span>
+        ${missing ? `<span class="dmx-chip">${missing} non obtenu${missing > 1 ? "s" : ""}</span>` : ""}</div>
+      <div class="dmx-dim">${escapeHtml(deck.desc)}</div>
+      <div class="dmx-deck-grid">${tiles}</div>
+      <div class="dmx-dim dmx-deck-names">${names}</div>
+      <div class="dmx-deck-actions">
+        <button class="dmx-btn-primary" data-deck="${index}">Copier le code du deck</button>
+        <a class="dmx-btn-ghost" href="/deck">Ouvrir Deck</a>
+      </div>
+    </div>`;
   }
 
   function renderSpells(s) {
-    if (s.classId == null) return `<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
+    const intro = `<p class="dmx-intro">Des decks de 10 sorts prêts à l'emploi pour ta classe et ton élément.
+      Clique sur « Copier le code », puis dans <strong>Deck</strong> → <strong>Importer un code</strong>, colle-le.</p>`;
+    if (s.classId == null) return `${intro}<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
     const cls = s.cat.classes.find((c) => c.id === s.classId);
-    const { damage, support } = DMX_ADVISOR.spellAdvice({
+    const args = {
       cards: Object.values(s.cat.cards),
       classId: s.classId,
       level: s.level,
       elementKey: s.elementKey,
       ownedCardIds: s.ownedCardIds,
-    });
+    };
+    currentDecks = DMX_ADVISOR.buildDecks(args);
+    const { damage, support } = DMX_ADVISOR.spellAdvice(args);
     const el = ELEMENTS[s.elementKey];
-    return `
+    return `${intro}
       ${cls ? `<section><h4>${escapeHtml(cls.n)} · ${escapeHtml(cls.role || "")}</h4>
         ${cls.passive ? `<div class="dmx-callout"><strong>${escapeHtml(cls.passive.name)}</strong> —
           ${escapeHtml(cls.passive.desc)}</div>` : ""}</section>` : ""}
-      <section><h4>Dégâts ${el.label} · les plus rentables</h4>
+      <section><h4>Decks proposés</h4>
+        ${currentDecks.length ? currentDecks.map((d, i) => deckHtml(d, s, i)).join("")
+          : `<p class="dmx-empty">Aucun sort connu pour cette classe : clique sur « Mettre à jour ».</p>`}</section>
+      <section><h4>Meilleurs sorts de dégâts ${el.label}</h4>
         ${damage.length ? `<ul>${damage.slice(0, 8).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
           : `<p class="dmx-empty">Aucun sort de dégâts ${el.label} connu pour cette classe.</p>`}</section>
       <section><h4>Soutien · boucliers, soins, buffs</h4>
@@ -272,7 +361,14 @@
     const q = normalize(searchInput.value.trim());
     if (!s.cat.monsters.length) return `<p class="dmx-empty">Bestiaire pas encore synchronisé.</p>`;
     if (q.length < 2) {
-      return `<div class="dmx-stats">
+      const lvl = s.level;
+      const near = lvl == null ? [] : s.cat.monsters
+        .filter((m) => m.lo <= lvl + 5 && m.hi >= lvl - 10 && (m.d || []).length)
+        .sort((a, b) => Math.abs(a.hi - lvl) - Math.abs(b.hi - lvl))
+        .slice(0, 6);
+      return `<p class="dmx-intro">Cherche un monstre (zones, butin) ou un objet (stats, qui le lâche).</p>
+        ${near.length ? `<section><h4>Monstres de ton niveau</h4><ul>${near.map(monsterHtml).join("")}</ul></section>` : ""}
+        <div class="dmx-stats">
           <div class="dmx-stat"><div class="dmx-stat-label">Monstres</div>
             <div class="dmx-stat-value">${s.cat.monsters.length}</div></div>
           <div class="dmx-stat"><div class="dmx-stat-label">Objets</div>
@@ -282,27 +378,9 @@
         </div>
         <p class="dmx-dim" style="margin-top:10px">Tape au moins 2 lettres pour chercher.</p>`;
     }
-    const zoneName = (id) => {
-      const z = s.cat.zones[id];
-      return z ? `${z.n} (${z.area})` : `zone ${id}`;
-    };
     const monsters = s.cat.monsters.filter((m) => normalize(m.n).includes(q)).slice(0, 6);
     const items = s.items.filter((i) => normalize(i.n).includes(q)).slice(0, 6);
-    const monsterHtml = monsters
-      .map((m) => {
-        const drops = (m.d || [])
-          .map(([id, min]) => {
-            const item = s.cat.items[id];
-            return item ? itemHtml(item, `${min} % · niv. ${item.lvl}`) : `<p class="dmx-dim">Objet ${id} (${min} %)</p>`;
-          })
-          .join("");
-        const zones = (m.z || []).map((id) => escapeHtml(zoneName(id))).join(", ") || "?";
-        return `<li class="dmx-row">
-          <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(m.n)}</span>
-            <span class="dmx-chip">niv. ${m.lo}–${m.hi}</span></div>
-          <div class="dmx-dim">${escapeHtml(m.race)} · ${zones}</div>${drops}</li>`;
-      })
-      .join("");
+    const monsterList = monsters.map(monsterHtml).join("");
     const itemList = items
       .map((i) => {
         const droppers = s.cat.monsters.filter((m) => (m.d || []).some(([id]) => id === i.id));
@@ -312,8 +390,32 @@
       })
       .join("");
     return `
-      <section><h4>Monstres</h4>${monsterHtml ? `<ul>${monsterHtml}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>
+      <section><h4>Monstres</h4>${monsterList ? `<ul>${monsterList}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>
       <section><h4>Objets</h4>${itemList ? `<ul>${itemList}</ul>` : `<p class="dmx-empty">Aucun.</p>`}</section>`;
+
+    // Monstre : niveaux, race, zones et butin (avec icônes).
+    function monsterHtml(m) {
+      const zoneName = (id) => {
+        const z = s.cat.zones[id];
+        return z ? `${z.n} (${z.area})` : `zone ${id}`;
+      };
+      const drops = (m.d || [])
+        .map(([id, min]) => {
+          const item = s.cat.items[id];
+          return item ? itemHtml(item, `${min} % · niv. ${item.lvl}`) : `<p class="dmx-dim">Objet ${id} (${min} %)</p>`;
+        })
+        .join("");
+      const zones = (m.z || []).map((id) => escapeHtml(zoneName(id))).join(", ") || "?";
+      const img = m.gfx != null
+        ? `<img src="/img/monsters/${encodeURIComponent(m.gfx)}.png" alt="" loading="lazy">` : "";
+      return `<li class="dmx-row">
+        <div class="dmx-monster"><span class="dmx-monster-img">${img}</span>
+          <div class="dmx-spell-text">
+            <div class="dmx-row-head"><span class="dmx-row-title">${escapeHtml(m.n)}</span>
+              <span class="dmx-chip">niv. ${m.lo}–${m.hi}</span></div>
+            <div class="dmx-dim">${escapeHtml(m.race)} · ${zones}</div>
+          </div></div>${drops}</li>`;
+    }
   }
 
   // ---------- Rendu général ----------
@@ -322,6 +424,9 @@
     const status = $(".dmx-sync-status");
     if (syncing) status.textContent = "Synchronisation…";
     else if (syncError) status.textContent = `⚠ ${syncError}`;
+    else if (s.cat.syncErrors?.length) {
+      status.textContent = `⚠ Pages non lues : ${s.cat.syncErrors.join(", ")} (réessaie « Mettre à jour »)`;
+    }
     else if (s.cat.syncedAt) {
       const minutes = Math.round((Date.now() - s.cat.syncedAt) / 60000);
       status.textContent = `${s.items.length} objets · ${Object.keys(s.cat.cards).length} sorts · ${
@@ -389,6 +494,43 @@
     });
   }
 
+  // Boutons de stratégie des points et champs du mode libre (contenu redessiné à chaque rendu).
+  body.addEventListener("click", async (e) => {
+    const deckButton = e.target.closest("[data-deck]");
+    if (deckButton) {
+      const deck = currentDecks[Number(deckButton.dataset.deck)];
+      const code = DMX_GAME.deckCode(state().classId, deck.cards.map((x) => x.card.id));
+      try {
+        await navigator.clipboard.writeText(code);
+        deckButton.textContent = "Code copié ✓";
+      } catch {
+        window.prompt("Copie ce code puis colle-le dans Deck → Importer un code :", code);
+      }
+      return;
+    }
+    const mode = e.target.closest("[data-mode]")?.dataset.mode;
+    if (!mode) return;
+    settings.pointsMode = mode;
+    save();
+    render();
+  });
+
+  body.addEventListener("input", (e) => {
+    const stat = e.target.dataset?.stat;
+    if (!stat) return;
+    settings.customPoints = { ...settings.customPoints, [stat]: e.target.value };
+    save();
+    const caret = e.target.selectionStart;
+    render();
+    const input = body.querySelector(`input[data-stat="${CSS.escape(stat)}"]`);
+    input?.focus();
+    try {
+      input?.setSelectionRange(caret, caret);
+    } catch {
+      // Les champs numériques ne gèrent pas toujours la position du curseur.
+    }
+  });
+
   searchInput.addEventListener("input", () => {
     body.innerHTML = renderBestiary(state());
   });
@@ -409,7 +551,7 @@
 
   // Export d'un échantillon des données de chaque page, pour faire évoluer l'extension.
   const EXPORT_PAGES = ["/bestiaire", "/bestiaire?onglet=objets", "/collection?onglet=sorts", "/personnage"];
-  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "presets", "classes", "zones", "breed"];
+  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "inventory", "current", "prestige", "presets", "zones"];
   const truncate = (value) => {
     const json = JSON.stringify(Array.isArray(value) ? value.slice(0, 3) : value);
     return json.length > 3000 ? json.slice(0, 3000) + "…" : JSON.parse(json);

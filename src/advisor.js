@@ -74,80 +74,182 @@ var DMX_ADVISOR = (() => {
     return { gain: value - row.base, newBase: value, left };
   }
 
-  function pointsAdvice(rows, pointsFree, elementKey) {
-    const el = ELEMENTS[elementKey];
-    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
-    const main = byKey[el.stat];
-    const advice = { main: null, vitalite: null, wasted: [] };
-    if (main && pointsFree > 0) advice.main = { row: main, ...buyPoints(main, pointsFree) };
-    if (byKey.vitalite && pointsFree > 0) {
-      advice.vitalite = { row: byKey.vitalite, ...buyPoints(byKey.vitalite, pointsFree) };
+  // Valeur d'un point de stat gagné, pour comparer les stats entre elles :
+  // 1 point de stat principale (≈ +1 % de dégâts) vaut environ 2 PV.
+  const POINT_VALUE = { main: 1, vitalite: 0.5 };
+
+  // Répartit `points` points de caractéristique selon une stratégie :
+  // - "optimal" : chaque point va là où il rapporte le plus (stat principale tant que son
+  //   coût reste bas, puis Vitalité quand la stat principale devient trop chère) ;
+  // - "element" : tout dans la stat de l'élément ; "vitalite" : tout en Vitalité ;
+  // - "libre" : `custom` = { clé de stat: points à dépenser }.
+  function planPoints(rows, points, strategy, elementKey, custom = {}) {
+    const mainKey = ELEMENTS[elementKey].stat;
+    const state = new Map(rows.map((r) => [r.key, { row: r, value: r.base, spent: 0 }]));
+    let left = points;
+    const buyOne = (key) => {
+      const st = state.get(key);
+      const cost = pointCost(st.row.tiers, st.value);
+      if (cost > left) return false;
+      left -= cost;
+      st.spent += cost;
+      st.value += 1;
+      return true;
+    };
+
+    if (strategy === "libre") {
+      for (const [key, wanted] of Object.entries(custom)) {
+        const st = state.get(key);
+        if (!st) continue;
+        let budget = Math.max(0, Math.floor(Number(wanted) || 0));
+        for (;;) {
+          const cost = pointCost(st.row.tiers, st.value);
+          if (cost > budget || !buyOne(key)) break;
+          budget -= cost;
+        }
+      }
+    } else if (strategy === "element" || strategy === "vitalite") {
+      const key = strategy === "vitalite" ? "vitalite" : mainKey;
+      if (state.has(key)) while (buyOne(key));
+    } else {
+      const candidates = [mainKey, "vitalite"].filter((k) => state.has(k));
+      for (;;) {
+        let best = null;
+        let bestRatio = 0;
+        for (const key of candidates) {
+          const st = state.get(key);
+          const cost = pointCost(st.row.tiers, st.value);
+          if (cost > left) continue;
+          const ratio = (key === mainKey ? POINT_VALUE.main : POINT_VALUE.vitalite) / cost;
+          if (ratio > bestRatio) {
+            best = key;
+            bestRatio = ratio;
+          }
+        }
+        if (!best) break;
+        buyOne(best);
+      }
     }
+
+    const alloc = [...state.values()]
+      .filter((st) => st.spent > 0)
+      .map((st) => ({ row: st.row, spent: st.spent, gain: st.value - st.row.base, newBase: st.value }))
+      .sort((a, b) => b.spent - a.spent);
     // Points déjà placés dans les stats des autres éléments : inutiles pour ce build.
-    for (const [key, other] of Object.entries(ELEMENTS)) {
-      if (key !== elementKey && byKey[other.stat]?.base > 0) advice.wasted.push(byKey[other.stat]);
-    }
-    return advice;
+    const wasted = Object.entries(ELEMENTS)
+      .filter(([key, el]) => key !== elementKey && state.get(el.stat)?.row.base > 0)
+      .map(([, el]) => state.get(el.stat).row);
+    return { alloc, left, wasted };
   }
 
-  // Pour chaque type d'emplacement : objet porté, meilleur objet possédé, meilleur objet à viser.
-  function gearAdvice({ items, slots, ownedIds, level, elementKey }) {
-    const usable = items.filter((i) => level == null || i.lvl <= level);
-    const bySlot = new Map();
+  // Objets possédés qui feraient mieux que ce qui est porté, emplacement par emplacement.
+  // Retourne une liste de { label, from (objet remplacé ou null si vide), to, gain }.
+  function gearUpgrades({ items, slots, ownedIds, level, elementKey }) {
+    const groups = new Map();
     for (const s of slots) {
       // Emplacements numérotés (anneau1, anneau2...) : même type d'objet.
       const type = s.item?.s || s.slot.replace(/\d+$/, "");
-      if (!bySlot.has(type)) bySlot.set(type, { label: s.label, worn: [], count: 0 });
-      const entry = bySlot.get(type);
-      entry.count += 1;
-      if (s.item) entry.worn.push(s.item);
+      if (!groups.has(type)) groups.set(type, { label: s.label, worn: [], count: 0 });
+      const g = groups.get(type);
+      g.count += 1;
+      if (s.item) g.worn.push(s.item);
     }
-    const rows = [];
-    for (const [type, { label, worn, count }] of bySlot) {
-      const rank = (list) =>
-        list
-          .filter((i) => i.s === type)
-          .map((i) => ({ item: i, score: itemScore(i, elementKey) }))
-          .sort((a, b) => b.score - a.score)
-          .slice(0, count);
-      const wornScored = worn.map((i) => ({ item: i, score: itemScore(i, elementKey) }));
-      const wornIds = new Set(worn.map((i) => i.id));
-      const worst = Math.min(...wornScored.map((w) => w.score));
-      // Emplacement pas plein : n'importe quel objet utile vaut mieux que rien.
-      const threshold = worn.length < count ? 0 : worst;
-      const better = (list) => list.filter((c) => !wornIds.has(c.item.id) && c.score > threshold);
-      rows.push({
-        type,
-        label: label || type,
-        worn: wornScored,
-        owned: ownedIds ? better(rank(usable.filter((i) => ownedIds.has(i.id)))) : [],
-        target: better(rank(usable.filter((i) => !ownedIds?.has(i.id)))),
-      });
-    }
-    return rows;
-  }
-
-  // Sorts de la classe : dégâts dans l'élément (classés par dégâts moyens par PA) et soutien.
-  function spellAdvice({ cards, classId, level, elementKey, ownedCardIds }) {
-    const el = ELEMENTS[elementKey];
-    const mine = cards.filter((c) => c.cls === classId && (level == null || c.lvl <= level));
-    const damage = [];
-    const support = [];
-    for (const card of mine) {
-      const dmg = (card.eff || []).filter(
-        (e) => ["dmg", "steal", "summon"].includes(e.k) && (e.el === el.code || e.el === "best")
-      );
-      const owned = ownedCardIds ? ownedCardIds.has(card.id) : null;
-      if (dmg.length) {
-        const avg = dmg.reduce((s, e) => s + (e.min + e.max) / 2, 0);
-        damage.push({ card, owned, perAp: avg / Math.max(1, card.ap) });
-      } else if ((card.eff || []).some((e) => e.tgt === "self" || e.tgt === "ally")) {
-        support.push({ card, owned });
+    const score = (item) => itemScore(item, elementKey);
+    const upgrades = [];
+    for (const [type, g] of groups) {
+      const wornIds = new Set(g.worn.map((i) => i.id));
+      const candidates = items
+        .filter((i) => i.s === type && ownedIds.has(i.id) && !wornIds.has(i.id))
+        .filter((i) => level == null || i.lvl <= level)
+        .map((i) => ({ item: i, score: score(i) }))
+        .filter((c) => c.score > 0)
+        .sort((a, b) => b.score - a.score);
+      // Emplacements vides d'abord, puis les objets portés du plus faible au plus fort.
+      const places = [
+        ...Array(g.count - g.worn.length).fill(null),
+        ...g.worn.map((i) => ({ item: i, score: score(i) })).sort((a, b) => a.score - b.score),
+      ];
+      for (const place of places) {
+        const best = candidates[0];
+        if (!best || (place && best.score <= place.score)) break;
+        candidates.shift();
+        upgrades.push({
+          label: g.label || type,
+          from: place?.item || null,
+          to: best.item,
+          gain: best.score - (place?.score || 0),
+        });
       }
     }
-    damage.sort((a, b) => b.perAp - a.perAp);
+    return upgrades.sort((a, b) => b.gain - a.gain);
+  }
+
+  // Effets qui infligent des dégâts (même liste que le jeu), et effets de soutien.
+  const DAMAGE_KINDS = ["dmg", "steal", "dmgCasterHp", "dmgLostHp", "detonate", "trap", "bomb", "poison", "summon"];
+  const DECK_SIZE = 10;
+
+  // Classe chaque sort de la classe : dégâts dans l'élément (dégâts moyens par PA),
+  // soutien (sur soi / un allié) ou autre.
+  function classifySpells({ cards, classId, level, elementKey, ownedCardIds }) {
+    const el = ELEMENTS[elementKey];
+    const damage = [];
+    const support = [];
+    const other = [];
+    for (const card of cards) {
+      if (card.cls !== classId || (level != null && card.lvl > level)) continue;
+      const owned = ownedCardIds ? ownedCardIds.has(card.id) : null;
+      const eff = card.eff || [];
+      const dmg = eff.filter(
+        (e) => DAMAGE_KINDS.includes(e.k) && (e.el == null || e.el === el.code || e.el === "best")
+      );
+      if (dmg.length) {
+        const avg = dmg.reduce((sum, e) => sum + ((e.min || 0) + (e.max ?? e.min ?? 0)) / 2, 0);
+        damage.push({ card, owned, perAp: avg / Math.max(1, card.ap) });
+      } else if (eff.some((e) => e.tgt === "self" || e.tgt === "ally")) {
+        support.push({ card, owned });
+      } else {
+        other.push({ card, owned });
+      }
+    }
+    // Sorts possédés d'abord, puis les plus rentables.
+    const byValue = (a, b) => (b.owned !== false) - (a.owned !== false) || (b.perAp || 0) - (a.perAp || 0);
+    damage.sort(byValue);
+    support.sort(byValue);
+    other.sort(byValue);
+    return { damage, support, other };
+  }
+
+  function spellAdvice(args) {
+    const { damage, support } = classifySpells(args);
     return { damage, support };
   }
 
-  return { ELEMENTS, itemScore, detectElement, buyPoints, pointsAdvice, gearAdvice, spellAdvice };
+  // Decks de 10 cartes selon trois styles de jeu.
+  function buildDecks(args) {
+    const { damage, support, other } = classifySpells(args);
+    const el = ELEMENTS[args.elementKey];
+    const recipes = [
+      { key: "degats", name: `Dégâts ${el.label}`, desc: "Le maximum de dégâts, un peu de soutien.", dmg: 7, sup: 3 },
+      { key: "equilibre", name: "Équilibré", desc: "Dégâts, protection et sorts utilitaires.", dmg: 5, sup: 3, oth: 2 },
+      { key: "survie", name: "Survie", desc: "Boucliers, soins et buffs pour tenir longtemps.", dmg: 4, sup: 6 },
+    ];
+    const decks = [];
+    for (const r of recipes) {
+      const picked = [
+        ...damage.slice(0, r.dmg),
+        ...support.slice(0, r.sup),
+        ...other.slice(0, r.oth || 0),
+      ];
+      // Complète jusqu'à 10 avec les meilleurs sorts restants.
+      const rest = [...damage, ...support, ...other].filter((x) => !picked.includes(x));
+      while (picked.length < DECK_SIZE && rest.length) picked.push(rest.shift());
+      if (!picked.length) continue;
+      const ids = picked.map((x) => x.card.id).join(",");
+      if (decks.some((d) => d.cards.map((x) => x.card.id).join(",") === ids)) continue;
+      decks.push({ ...r, cards: picked });
+    }
+    return decks;
+  }
+
+  return { ELEMENTS, DECK_SIZE, itemScore, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
 })();

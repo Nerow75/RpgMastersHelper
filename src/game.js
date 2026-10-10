@@ -101,6 +101,70 @@ var DMX_GAME = (() => {
     return found;
   }
 
+  // Premier objet qui possède tous les champs demandés (ex. les props d'un composant).
+  function findObject(value, keys) {
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        const found = findObject(v, keys);
+        if (found) return found;
+      }
+    } else if (value && typeof value === "object") {
+      if (keys.every((k) => k in value)) return value;
+      for (const v of Object.values(value)) {
+        const found = findObject(v, keys);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // En-tête du site : bouton « Mon profil et mon énergie » qui affiche « Niv. 112 ».
+  function readHeaderLevel(root) {
+    const button = root.querySelector('button[aria-label="Mon profil et mon énergie"]');
+    const m = button?.textContent.match(/Niv\.\s*(\d+)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  // Code de deck du jeu (« DM-S-… »), à coller dans Deck → « Importer un code ».
+  // Même format que le bouton « Code du deck » du site : version 2, classe, nombre de cartes
+  // et identifiants en entiers variables, écrits en base 32, suivis d'un contrôle FNV-1a.
+  const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const MAX_CARD_ID = 0x80000000 - 1;
+
+  function pushVarint(bytes, value) {
+    let v = Math.max(0, Math.floor(value));
+    for (; v >= 128; v = Math.floor(v / 128)) bytes.push((v % 128) | 128);
+    bytes.push(v);
+  }
+
+  function deckCode(classId, cardIds) {
+    const ids = [...new Set(cardIds.map((id) => Math.floor(Number(id))))]
+      .filter((id) => Number.isInteger(id) && id > 0 && id <= MAX_CARD_ID)
+      .slice(0, 30);
+    const bytes = [2];
+    pushVarint(bytes, classId);
+    pushVarint(bytes, ids.length);
+    for (const id of ids) pushVarint(bytes, id);
+
+    let body = "";
+    let buffer = 0;
+    let bits = 0;
+    for (const byte of bytes) {
+      buffer = (buffer << 8) | (byte & 255);
+      bits += 8;
+      for (; bits >= 5; bits -= 5) body += CODE_ALPHABET[(buffer >>> (bits - 5)) & 31];
+      buffer &= (1 << bits) - 1;
+    }
+    if (bits > 0) body += CODE_ALPHABET[(buffer << (5 - bits)) & 31];
+
+    let hash = 0x811c9dc5;
+    for (const byte of [83, ...bytes]) hash = Math.imul(hash ^ byte, 0x1000193) >>> 0;
+    const top = hash >>> 12;
+    let check = "";
+    for (let i = 3; i >= 0; i--) check += CODE_ALPHABET[(top >>> (5 * i)) & 31];
+    return `DM-S-${body}-${check}`;
+  }
+
   // Télécharge une page du jeu (avec la session du joueur) et en extrait les listes.
   async function fetchPageData(url) {
     const res = await fetch(url, { credentials: "same-origin" });
@@ -110,5 +174,5 @@ var DMX_GAME = (() => {
     return parseFlight(flightFromHtml(await res.text()));
   }
 
-  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, fetchPageData };
+  return { readLevel, readCollection, flightFromHtml, parseFlight, findRecords, findFields, findObject, readHeaderLevel, deckCode, fetchPageData };
 })();

@@ -502,3 +502,191 @@
     transition: none;
   }
 }
+
+/* ---------- Ajouts : intro des onglets, stratégies de points, mode libre ---------- */
+
+#dmx-panel .dmx-intro {
+  margin: 10px 0 0;
+  color: var(--dmx-muted);
+  font-size: 0.8rem;
+}
+
+#dmx-panel .dmx-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0;
+}
+
+#dmx-panel button.dmx-mode {
+  cursor: pointer;
+  font-family: var(--dmx-sans);
+}
+
+#dmx-panel button.dmx-mode:hover {
+  color: var(--dmx-parchment);
+}
+
+#dmx-panel button.dmx-mode.active {
+  color: var(--dmx-gold);
+  background: color-mix(in srgb, var(--dmx-gold) 15%, transparent);
+  border-color: var(--dmx-gold);
+}
+
+#dmx-panel .dmx-free {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+#dmx-panel .dmx-free-row {
+  display: grid;
+  grid-template-columns: 1fr 72px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+#dmx-panel .dmx-free-row input {
+  width: 100%;
+  padding: 0.25rem 0.45rem;
+  font: 600 0.82rem var(--dmx-sans);
+  color: var(--dmx-parchment);
+  background-color: var(--dmx-bark);
+  border: 1px solid var(--dmx-line-2);
+  border-radius: 0.5rem;
+  outline: none;
+  box-shadow: inset 0 1px 3px #00000059;
+}
+
+#dmx-panel .dmx-free-row input:focus {
+  border-color: var(--dmx-gold);
+}
+
+#dmx-panel .dmx-arrow {
+  margin: 2px 0 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--dmx-leaf);
+}
+
+/* ---------- Sorts : icônes et decks ---------- */
+
+#dmx-panel .dmx-spell {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+
+#dmx-panel .dmx-spell-icon,
+#dmx-panel .dmx-deck-card {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--dmx-bark);
+  border: 1.5px solid color-mix(in srgb, var(--dmx-ac) 45%, transparent);
+  border-radius: 0.6rem;
+  box-shadow: inset 0 1px #ffffff0d, 0 2px 6px #0000004d;
+}
+
+#dmx-panel .dmx-spell-icon {
+  width: 38px;
+  height: 38px;
+}
+
+#dmx-panel .dmx-spell-icon img,
+#dmx-panel .dmx-deck-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#dmx-panel .dmx-spell-text {
+  min-width: 0;
+  flex: 1;
+}
+
+#dmx-panel .dmx-deck-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin: 8px 0 4px;
+}
+
+#dmx-panel .dmx-deck-card {
+  aspect-ratio: 1;
+}
+
+#dmx-panel .dmx-deck-card.dmx-locked {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+#dmx-panel .dmx-deck-names {
+  font-size: 0.7rem;
+}
+
+#dmx-panel .dmx-deck-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#dmx-panel .dmx-btn-primary,
+#dmx-panel .dmx-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.7rem;
+  font: 700 0.8rem var(--dmx-display);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+#dmx-panel .dmx-btn-primary {
+  flex: 1;
+  color: #132008;
+  border: none;
+  text-shadow: 0 1px #ffffff26;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dmx-leaf) 88%, #fff) 0%,
+    var(--dmx-leaf) 45%,
+    color-mix(in srgb, var(--dmx-leaf) 82%, #000) 100%
+  );
+  box-shadow: inset 0 1px #ffffff40, 0 2px #43611f, 0 4px 10px -4px #0006;
+}
+
+#dmx-panel .dmx-btn-ghost {
+  color: var(--dmx-parchment);
+  border: 1px solid var(--dmx-line-2);
+  background: linear-gradient(#ffeecd13, #ffeecd06);
+  box-shadow: var(--dmx-hl), var(--dmx-shadow-1);
+}
+
+#dmx-panel .dmx-monster {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+#dmx-panel .dmx-monster-img {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 0.7rem;
+  background: radial-gradient(circle at 50% 70%, #ffe2aa14, transparent 70%), var(--dmx-bark);
+  border: 1px solid var(--dmx-line-2);
+}
+
+#dmx-panel .dmx-monster-img img {
+  max-width: 44px;
+  max-height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 2px #0009);
+}

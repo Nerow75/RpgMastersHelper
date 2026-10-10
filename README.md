@@ -10,14 +10,16 @@ L'extension ne fait que **lire** : elle ne clique, n'équipe et ne modifie rien 
 ## Ce que fait le panneau
 
 - **Conseils**
-  - élément de ton build, détecté d'après ton équipement (ou choisi à la main) ;
-  - où mettre tes points libres, avec les vrais coûts par palier du jeu ;
-  - pour chaque emplacement : ce que tu portes, un meilleur objet que tu possèdes déjà,
-    et le meilleur objet à viser à ton niveau.
-- **Sorts** : passif de ta classe, sorts de dégâts de ton élément classés par dégâts/PA,
-  sorts de soutien, avec ceux que tu n'as pas encore.
-- **Bestiaire** : recherche d'un monstre (niveaux, zones, butin) ou d'un objet
-  (stats, monstres qui le lâchent).
+  - niveau, prestige, classe et élément de ton build détectés automatiquement
+    (classe et élément modifiables à la main) ;
+  - où mettre tes points libres : « Recommandé » (chaque point là où il rapporte le plus,
+    avec les vrais coûts par palier du jeu), tout dans l'élément, tout en Vitalité, ou
+    « Libre » pour répartir toi-même ;
+  - les objets de ton inventaire qui feraient mieux que ce que tu portes.
+- **Sorts** : trois decks de 10 sorts (Dégâts, Équilibré, Survie) avec leurs images, et un
+  bouton qui copie le **code du deck** à coller dans Deck → « Importer un code ».
+- **Bestiaire** : monstres de ton niveau et leur butin, recherche d'un monstre (zones,
+  butin) ou d'un objet (stats, monstres qui le lâchent).
 
 ## D'où viennent les données
 
@@ -29,7 +31,7 @@ télécharge ces pages avec ta session (il faut être connecté) :
 | `/bestiaire` | monstres, zones, butin | 1 fois par jour |
 | `/bestiaire?onglet=objets`, `/collection?onglet=objets` | objets et leurs stats | 1 fois par jour |
 | `/collection?onglet=sorts` | sorts | 1 fois par jour |
-| `/personnage` | équipement porté, caractéristiques, points libres, classes | toutes les 10 min |
+| `/personnage` | niveau, prestige, classe, équipement, inventaire, caractéristiques, points libres | toutes les 10 min |
 
 Le bouton **Mettre à jour** force une synchronisation complète. Ton niveau et tes objets
 obtenus sont aussi lus quand tu ouvres **Ma collection**.
