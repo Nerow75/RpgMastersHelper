@@ -504,16 +504,6 @@
   cursor: default;
 }
 
-#dmx-panel .dmx-export-out {
-  width: 100%;
-  height: 120px;
-  color: var(--dmx-parchment);
-  background: var(--dmx-bark);
-  border: 1px solid var(--dmx-line-2);
-  border-radius: 0.5rem;
-  font: 11px/1.3 ui-monospace, monospace;
-}
-
 /* ---------- Bouton flottant quand le panneau est fermé ---------- */
 
 #dmx-launcher {

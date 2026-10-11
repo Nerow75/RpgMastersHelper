@@ -68,8 +68,6 @@
     <div class="dmx-footer">
       <span class="dmx-sync-status"></span>
       <button class="dmx-sync" title="Relire maintenant toutes les données du jeu">↻ Tout relire</button>
-      <button class="dmx-export" title="Pour aider au développement de l'extension">Exporter</button>
-      <textarea class="dmx-export-out" readonly hidden></textarea>
       <a class="dmx-credit" href="https://a-nerow.fr" target="_blank" rel="noopener">Fait par NRW</a>
     </div>
   `;
@@ -993,6 +991,20 @@
     chrome.storage.local.set({ [STORAGE_KEY]: settings });
   }
 
+  // Plusieurs onglets du jeu peuvent être ouverts : chacun reprend les réglages enregistrés
+  // par les autres, sinon un onglet resté ouvert réécrirait d'anciennes valeurs (par exemple
+  // le message de bienvenue, déjà fermé ailleurs, qui reviendrait).
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const next = area === "local" && changes[STORAGE_KEY]?.newValue;
+    if (!next || JSON.stringify(next) === JSON.stringify(settings)) return;
+    settings = { ...settings, ...next };
+    if (!panel.isConnected) return; // pas encore affiché : l'initialisation lira ces réglages
+    applyVisibility();
+    applyCollapsed();
+    placePanel();
+    render();
+  });
+
   async function sync(force) {
     syncing = true;
     syncError = null;
@@ -1103,66 +1115,6 @@
     settings.visible = false;
     applyVisibility();
     save();
-  });
-
-  // Export d'un échantillon des données de chaque page, pour faire évoluer l'extension.
-  const EXPORT_PAGES = ["/bestiaire", "/bestiaire?onglet=objets", "/collection?onglet=sorts", "/personnage"];
-  const EXPORT_FIELDS = ["rows", "pointsFree", "slots", "inventory", "choices", "current", "prestige", "presets", "zones"];
-  const truncate = (value) => {
-    const json = JSON.stringify(Array.isArray(value) ? value.slice(0, 3) : value);
-    return json.length > 3000 ? json.slice(0, 3000) + "…" : JSON.parse(json);
-  };
-
-  $(".dmx-export").addEventListener("click", async (e) => {
-    const button = e.currentTarget;
-    const out = $(".dmx-export-out");
-    button.disabled = true;
-    const report = {};
-    for (const url of EXPORT_PAGES) {
-      try {
-        const values = await DMX_GAME.fetchPageData(url);
-        const records = {};
-        for (const [key, group] of Object.entries(DMX_GAME.findRecords(values))) {
-          records[key] = { count: group.size, sample: truncate([...group.values()]) };
-        }
-        const fields = {};
-        for (const [key, value] of Object.entries(DMX_GAME.findFields(values, EXPORT_FIELDS))) {
-          fields[key] = truncate(value);
-        }
-        report[url] = { records, fields };
-      } catch (err) {
-        report[url] = `erreur : ${err.message}`;
-      }
-    }
-    // Diagnostic : ce que l'extension a compris des données (sans rien d'identifiant).
-    const st = state();
-    report.diagnostic = {
-      objetsConnus: st.items.length,
-      objetsInventaire: st.inventory ? st.inventory.reduce((n, e) => n + e.qty, 0) : null,
-      lignesInventaire: st.inventory?.length ?? null,
-      objetsPortes: (st.character?.slots || []).filter((x) => x.item).length,
-      sortsConnus: Object.keys(st.cat.cards).length,
-      sortsUtilisables: st.character?.deck?.usableCardIds?.length ?? null,
-      deckActif: st.character?.deck?.activeDeckIds?.length ?? null,
-      monstres: st.cat.monsters.length,
-      niveau: st.level,
-      classe: st.classId,
-      energieLue: !!st.character?.energy,
-      codesEquipement: (st.character?.gearCodes || []).length,
-      codeEquipementReconnu: st.gearCodesOk,
-      panoplies: st.sets.length,
-      pagesEnErreur: st.cat.syncErrors || [],
-    };
-    out.value = JSON.stringify(report, null, 1);
-    out.hidden = false;
-    out.select();
-    try {
-      await navigator.clipboard.writeText(out.value);
-      button.textContent = "Copié !";
-    } catch {
-      button.textContent = "Copie (Ctrl+C)";
-    }
-    button.disabled = false;
   });
 
   // Déplacement : on tire l'en-tête (souris ou doigt). La position est retenue

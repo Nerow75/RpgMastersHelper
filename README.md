@@ -262,8 +262,6 @@ la fonctionnalité correspondante cesse de fonctionner, sans gêner le jeu lui-m
   session ; les requêtes utilisent la session du navigateur comme une navigation normale.
 - **Stockage local** (`chrome.storage.local`) : catalogue du jeu, fiche du personnage et
   préférences d'affichage, effaçables en désinstallant l'extension.
-- Le bouton **Exporter** (pied du panneau) produit un échantillon de la structure des données
-  et un diagnostic (nombre d'objets, de sorts, etc. compris par l'extension). Il n'est envoyé nulle part : le joueur choisit de le copier ou non.
 
 ---
 
