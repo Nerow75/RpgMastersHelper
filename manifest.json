@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RpgMasters Helper",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Recommandations de caractéristiques, d'équipement et de decks de sorts pour RpgMasters.",
   "permissions": [
     "storage"
@@ -22,6 +22,12 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/icon128.png"],
+      "matches": ["https://rpgmasters.houk.fr/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [

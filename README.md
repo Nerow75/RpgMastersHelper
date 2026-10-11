@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.png" alt="Logo RpgMasters Helper" width="128"></p>
+
 # RpgMasters Helper
 
 Extension de navigateur non officielle pour **[RpgMasters](https://rpgmasters.houk.fr/)**.

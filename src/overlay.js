@@ -27,11 +27,8 @@
   let currentDecks = []; // decks affichés dans l'onglet Sorts
   let syncing = false;
 
-  // Icône « livre » au même trait que celles du site.
-  const ICON = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
-    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v15H5.5A1.5 1.5 0 0 0 4 19.5Z"></path>
-    <path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H20M9 8h6M9 12h4"></path></svg>`;
+  // Logo de l'extension (icons/, déclaré dans web_accessible_resources).
+  const ICON = `<img class="dmx-logo" src="${chrome.runtime.getURL("icons/icon128.png")}" alt="" aria-hidden="true">`;
 
   const panel = document.createElement("div");
   panel.id = "dmx-panel";
