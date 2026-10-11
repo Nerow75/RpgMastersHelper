@@ -70,6 +70,7 @@
       <button class="dmx-sync" title="Relire maintenant toutes les données du jeu">↻ Tout relire</button>
       <button class="dmx-export" title="Pour aider au développement de l'extension">Exporter</button>
       <textarea class="dmx-export-out" readonly hidden></textarea>
+      <a class="dmx-credit" href="https://a-nerow.fr" target="_blank" rel="noopener">Fait par NRW</a>
     </div>
   `;
 

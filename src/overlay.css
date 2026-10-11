@@ -1216,3 +1216,16 @@ input.dmx-highlight {
   font-size: 0.72rem;
   color: var(--dmx-dim);
 }
+
+#dmx-panel .dmx-credit {
+  flex-basis: 100%;
+  font-size: 0.66rem;
+  text-align: center;
+  color: var(--dmx-dim);
+  text-decoration: none;
+}
+
+#dmx-panel .dmx-credit:hover {
+  color: var(--dmx-gold);
+  text-decoration: underline;
+}

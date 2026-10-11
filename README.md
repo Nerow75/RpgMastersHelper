@@ -328,3 +328,7 @@ elle les charge depuis le site. Les captures du dossier `docs/images` en montren
 d'illustration.
 
 Licence : à définir avec le propriétaire du jeu.
+
+---
+
+Fait par **NRW** — [a-nerow.fr](https://a-nerow.fr)
