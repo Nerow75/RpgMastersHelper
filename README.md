@@ -36,6 +36,12 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 
 ## Fonctionnalités
 
+Les conseils suivent la **méta de RpgMasters**, différente de celle de DOFUS : on cherche à
+monter de niveau le plus vite possible pour atteindre le niveau 200 et passer les prestiges.
+Les points de caractéristique vont donc **tous dans une seule caractéristique**, par défaut la
+**Sagesse** (bonus d'XP) ; les dégâts viennent de l'équipement et du deck, construit autour du
+**vol de vie**.
+
 ### Conseils
 - **À faire maintenant** : une liste d'actions concrètes et ordonnées (placer ses points,
   équiper un meilleur objet, mettre le deck conseillé, combattre les Recherchés et Archimages
@@ -45,13 +51,16 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
 - **Carte du personnage** : nom, classe, niveau, prestige, kamas et énergie (avec le temps
   restant avant le prochain point), plus l'élément du build, déduit de l'équipement porté.
   Classe et élément restent modifiables.
+- **Progression** : jauge vers le niveau 200 (prestige) et étape « Monte de niveau en masse » :
+  groupes de la Chasse avec Recherchés et Archimages, puis l'Aventure pour passer les paliers.
 - **Points de caractéristique** (bouton **« Remplir pour moi »** : la page Personnage s'ouvre
-  avec les champs « Nombre de … à ajouter » déjà remplis), selon quatre stratégies au choix :
-  - *Recommandé* : chaque point est placé là où il rapporte le plus, en tenant compte des
-    **paliers de coût réels** du jeu (la stat de l'élément tant qu'elle est bon marché, puis la
-    Vitalité) ;
+  avec le champ « Nombre de … à ajouter » déjà rempli), tout dans une caractéristique :
+  - *Tout Sagesse (XP)* : la méta, par défaut ;
   - *Tout dans l'élément*, *Tout en Vitalité* ;
-  - *Libre* : le joueur répartit lui-même, l'extension calcule le gain exact et les points restants.
+  - *Libre* : le joueur répartit lui-même, l'extension calcule le gain exact (paliers de coût
+    du jeu) et les points restants.
+  Si des points sont déjà placés ailleurs, l'extension rappelle que la **réinitialisation est
+  gratuite** et indique ce qu'elle rapporterait.
 - **Équipement à changer** : uniquement les objets **déjà présents dans l'inventaire** qui
   surpassent ceux portés, emplacement par emplacement, avec le gain estimé. Le calcul tient
   compte du **niveau de fusion** des objets et des **bonus de panoplie** gagnés ou perdus.
@@ -66,10 +75,12 @@ change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle 
   se rechargeait, atteint son maximum.
 
 ### Sorts
-- Passif de la classe et sorts les plus rentables (dégâts moyens par PA) dans l'élément choisi.
-- **Trois decks** (Dégâts, Équilibré, Survie) composés uniquement de sorts que le personnage
-  peut réellement utiliser, à la taille de deck du jeu, avec les icônes du jeu. Le deck déjà
-  équipé est signalé.
+- Sorts classés par rôle : **vol de vie**, **dégâts**, **protection** (boucliers, soins,
+  résistances), avec ceux qui vont avec le **passif** de la classe mis en avant.
+- **Trois decks** construits par rotation : *Vol de vie* (la méta : dégâts, vol de vie, dégâts,
+  vol de vie, bouclier), *Dégâts* et *Survie*. **8 cartes par défaut** (moins de cartes = des
+  rotations plus régulières), 9 ou 10 au choix. Uniquement des sorts que le personnage peut
+  utiliser ; le deck déjà équipé est signalé.
 - Bouton **« Copier le code du deck »** : génère un code au format officiel `DM-S-…`, à coller
   dans *Deck → Importer un code*. C'est le jeu qui valide et applique le deck.
 
@@ -176,11 +187,14 @@ une page échoue, les autres sont conservées et l'erreur est signalée dans le 
 
 - **Coût des points** : simulation point par point à partir des paliers `tiers` fournis par le jeu.
 - **Note d'un objet** : somme pondérée de ses stats pour l'élément choisi (poids dans
-  `WEIGHTS`, `src/advisor.js` ; par exemple 1 PA ≈ 100 points de stat principale). C'est une
-  estimation, ajustable.
+  `WEIGHTS`, `src/advisor.js` ; par exemple 1 PA ≈ 100 points de stat principale ; la Sagesse
+  vaut autant que la stat de l'élément, pour l'XP). C'est une estimation, ajustable.
 - **Decks** : sorts utilisables par le personnage (liste fournie par la page Deck), classés par
-  dégâts moyens par PA dans l'élément, complétés par des sorts de soutien selon le style du
-  deck. Un deck est considéré comme équipé si le deck actif contient tous ses sorts.
+  rôle puis par valeur par PA (dégâts moyens dans l'élément, ou montant du bouclier / soin),
+  ×1,3 en synergie avec le passif (mots-clés de sa description : « 2 PA ou moins »,
+  « bouclier / soin / résistance », « invocation »…). Chaque deck suit un motif de rôles ; si
+  un rôle manque, le meilleur sort d'un rôle voisin le remplace. Un deck est considéré comme
+  équipé si le deck actif contient tous ses sorts.
 - **Codes d'équipement** : format déduit d'un code fourni par le site. Avant de proposer ses
   propres codes, l'extension vérifie qu'elle **reproduit exactement** le code de l'équipement
   porté fourni par le site ; sinon, aucun code n'est proposé.

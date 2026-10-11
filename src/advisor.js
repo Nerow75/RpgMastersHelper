@@ -11,8 +11,10 @@ var DMX_ADVISOR = (() => {
 
   // Valeur d'un point de chaque stat, en "points de stat principale".
   // C'est une estimation à ajuster : 1 PA vaut beaucoup plus que 1 point de Vitalité.
+  // Méta RpgMasters : on monte de niveau le plus vite possible (prestiges), donc la Sagesse
+  // (bonus d'XP) vaut autant que la stat de l'élément ; les dégâts viennent de l'équipement.
   const WEIGHTS = {
-    puissance: 1, dommages: 5, vitalite: 0.25, sagesse: 0.3,
+    puissance: 1, dommages: 5, vitalite: 0.25, sagesse: 1,
     pa: 100, pm: 90, po: 30, critique: 8, dommagesCritiques: 3, invocations: 20,
     initiative: 0.05, prospection: 0.1, soins: 1, tacle: 4, fuite: 4,
     retraitPA: 3, retraitPM: 3, esquivePA: 2, esquivePM: 2, renvoi: 2, dommagesPoussee: 1,
@@ -105,17 +107,13 @@ var DMX_ADVISOR = (() => {
     return { gain: value - row.base, newBase: value, left };
   }
 
-  // Valeur d'un point de stat gagné, pour comparer les stats entre elles :
-  // 1 point de stat principale (≈ +1 % de dégâts) vaut environ 2 PV.
-  const POINT_VALUE = { main: 1, vitalite: 0.5 };
+  // Méta RpgMasters : tous les points dans UNE caractéristique. Par défaut la Sagesse,
+  // pour gagner plus d'XP et atteindre vite le niveau 200 (prestiges).
+  // Stratégies : "sagesse", "element" (stat de l'élément), "vitalite", ou "libre"
+  // (`custom` = { clé de stat: nombre de points de caractéristique à dépenser }).
+  const STRATEGY_STAT = { sagesse: () => "sagesse", vitalite: () => "vitalite", element: (el) => ELEMENTS[el].stat };
 
-  // Répartit `points` points de caractéristique selon une stratégie :
-  // - "optimal" : chaque point va là où il rapporte le plus (stat principale tant que son
-  //   coût reste bas, puis Vitalité quand la stat principale devient trop chère) ;
-  // - "element" : tout dans la stat de l'élément ; "vitalite" : tout en Vitalité ;
-  // - "libre" : `custom` = { clé de stat: points à dépenser }.
   function planPoints(rows, points, strategy, elementKey, custom = {}) {
-    const mainKey = ELEMENTS[elementKey].stat;
     const state = new Map(rows.map((r) => [r.key, { row: r, value: r.base, spent: 0 }]));
     let left = points;
     const buyOne = (key) => {
@@ -139,38 +137,38 @@ var DMX_ADVISOR = (() => {
           budget -= cost;
         }
       }
-    } else if (strategy === "element" || strategy === "vitalite") {
-      const key = strategy === "vitalite" ? "vitalite" : mainKey;
-      if (state.has(key)) while (buyOne(key));
     } else {
-      const candidates = [mainKey, "vitalite"].filter((k) => state.has(k));
-      for (;;) {
-        let best = null;
-        let bestRatio = 0;
-        for (const key of candidates) {
-          const st = state.get(key);
-          const cost = pointCost(st.row.tiers, st.value);
-          if (cost > left) continue;
-          const ratio = (key === mainKey ? POINT_VALUE.main : POINT_VALUE.vitalite) / cost;
-          if (ratio > bestRatio) {
-            best = key;
-            bestRatio = ratio;
-          }
-        }
-        if (!best) break;
-        buyOne(best);
-      }
+      const key = (STRATEGY_STAT[strategy] || STRATEGY_STAT.sagesse)(elementKey);
+      if (state.has(key)) while (buyOne(key));
     }
 
     const alloc = [...state.values()]
       .filter((st) => st.spent > 0)
       .map((st) => ({ row: st.row, spent: st.spent, gain: st.value - st.row.base, newBase: st.value }))
       .sort((a, b) => b.spent - a.spent);
-    // Points déjà placés dans les stats des autres éléments : inutiles pour ce build.
-    const wasted = Object.entries(ELEMENTS)
-      .filter(([key, el]) => key !== elementKey && state.get(el.stat)?.row.base > 0)
-      .map(([, el]) => state.get(el.stat).row);
-    return { alloc, left, wasted };
+    return { alloc, left };
+  }
+
+  // Points déjà investis dans une caractéristique (récupérables : la réinitialisation est gratuite).
+  function investedPoints(row) {
+    let total = 0;
+    for (let v = 0; v < row.base; v++) total += pointCost(row.tiers, v);
+    return total;
+  }
+
+  // Si des points sont placés ailleurs que dans la caractéristique visée : ce que donnerait
+  // une réinitialisation (gratuite) suivie de « tout dans cette caractéristique ».
+  function resetAdvice(rows, pointsFree, strategy, elementKey) {
+    if (strategy === "libre") return null;
+    const key = (STRATEGY_STAT[strategy] || STRATEGY_STAT.sagesse)(elementKey);
+    const target = rows.find((r) => r.key === key);
+    const elsewhere = rows.filter((r) => r.key !== key && r.base > 0);
+    if (!target || !elsewhere.length) return null;
+    const total = pointsFree + rows.reduce((sum, r) => sum + investedPoints(r), 0);
+    const after = buyPoints({ ...target, base: 0 }, total).newBase;
+    const now = buyPoints(target, pointsFree).newBase;
+    if (after <= now) return null;
+    return { row: target, elsewhere, total, after, now };
   }
 
   // Type d'objet d'un emplacement (anneau1, anneau2... -> anneau).
@@ -289,76 +287,125 @@ var DMX_ADVISOR = (() => {
     return { fusable, useless };
   }
 
-  // Effets qui infligent des dégâts (même liste que le jeu), et effets de soutien.
+  // Effets qui infligent des dégâts (même liste que le jeu).
   const DAMAGE_KINDS = ["dmg", "steal", "dmgCasterHp", "dmgLostHp", "detonate", "trap", "bomb", "poison", "summon"];
   const DECK_SIZE = 10;
 
-  // Classe chaque sort de la classe : dégâts dans l'élément (dégâts moyens par PA),
-  // soutien (sur soi / un allié) ou autre.
+  // Rôle d'un sort dans la méta : vol de vie, dégâts, protection (bouclier, soin, résistances)
+  // ou autre (buffs, placement…).
+  function spellRole(card) {
+    const eff = card.eff || [];
+    if (eff.some((e) => e.k === "steal")) return "steal";
+    if (eff.some((e) => DAMAGE_KINDS.includes(e.k))) return "damage";
+    if (eff.some((e) => /^shield|^heal/.test(e.k) || /^resPct/.test(e.stat || ""))) return "shield";
+    return "other";
+  }
+
+  // Le passif de la classe favorise certains sorts (mots-clés de sa description).
+  function passiveSynergy(passive, card, role) {
+    const text = (passive?.desc || "").toLowerCase();
+    if (!text) return false;
+    if (/2 pa ou moins/.test(text) && card.ap <= 2) return true;
+    if (/bouclier|soin|résistance/.test(text) && role === "shield") return true;
+    if (/invocation/.test(text) && (card.eff || []).some((e) => e.k === "summon")) return true;
+    if (/vol de vie|vole/.test(text) && role === "steal") return true;
+    return false;
+  }
+
+  // Valeur d'un sort par PA : dégâts moyens dans l'élément (les autres éléments comptent moins),
+  // ou montant du bouclier / soin pour la protection ; ×1,3 en synergie avec le passif.
+  function spellValue(card, role, el) {
+    const eff = card.eff || [];
+    let value = 0;
+    if (role === "steal" || role === "damage") {
+      const dmg = eff.filter((e) => DAMAGE_KINDS.includes(e.k));
+      const avg = (e) => ((e.min || 0) + (e.max ?? e.min ?? 0)) / 2;
+      const inElement = dmg.filter((e) => e.el == null || e.el === el.code || e.el === "best");
+      value = inElement.length ? inElement.reduce((sum, e) => sum + avg(e), 0) : Math.max(0, ...dmg.map(avg)) * 0.7;
+    } else {
+      value = eff.reduce((sum, e) => sum + (e.min || 0), 0);
+    }
+    return value / Math.max(1, card.ap);
+  }
+
+  // Classe les sorts utilisables par rôle, du plus rentable au moins rentable.
   // `usableCardIds` (page Deck du jeu) : si connu, seuls ces sorts sont proposés, car le jeu
   // refuse les autres à l'import d'un code de deck.
-  function classifySpells({ cards, classId, level, elementKey, ownedCardIds, usableCardIds }) {
+  function classifySpells({ cards, classId, level, elementKey, ownedCardIds, usableCardIds, passive }) {
     const el = ELEMENTS[elementKey];
-    const damage = [];
-    const support = [];
-    const other = [];
+    const roles = { steal: [], damage: [], shield: [], other: [] };
     for (const card of cards) {
       if (usableCardIds) {
         if (!usableCardIds.has(card.id)) continue;
       } else if (card.cls !== classId || (level != null && card.lvl > level)) {
         continue;
       }
-      const owned = usableCardIds ? true : ownedCardIds ? ownedCardIds.has(card.id) : null;
-      const eff = card.eff || [];
-      const dmg = eff.filter(
-        (e) => DAMAGE_KINDS.includes(e.k) && (e.el == null || e.el === el.code || e.el === "best")
-      );
-      if (dmg.length) {
-        const avg = dmg.reduce((sum, e) => sum + ((e.min || 0) + (e.max ?? e.min ?? 0)) / 2, 0);
-        damage.push({ card, owned, perAp: avg / Math.max(1, card.ap) });
-      } else if (eff.some((e) => e.tgt === "self" || e.tgt === "ally")) {
-        support.push({ card, owned });
-      } else {
-        other.push({ card, owned });
-      }
+      const role = spellRole(card);
+      const synergy = passiveSynergy(passive, card, role);
+      roles[role].push({
+        card,
+        role,
+        synergy,
+        owned: usableCardIds ? true : ownedCardIds ? ownedCardIds.has(card.id) : null,
+        perAp: spellValue(card, role, el) * (synergy ? 1.3 : 1),
+      });
     }
-    // Sorts possédés d'abord, puis les plus rentables.
-    const byValue = (a, b) => (b.owned !== false) - (a.owned !== false) || (b.perAp || 0) - (a.perAp || 0);
-    damage.sort(byValue);
-    support.sort(byValue);
-    other.sort(byValue);
-    return { damage, support, other };
+    const byValue = (a, b) => (b.owned !== false) - (a.owned !== false) || b.perAp - a.perAp;
+    for (const list of Object.values(roles)) list.sort(byValue);
+    return roles;
   }
 
   function spellAdvice(args) {
-    const { damage, support } = classifySpells(args);
-    return { damage, support };
+    return classifySpells(args);
   }
 
-  // Decks selon trois styles de jeu (taille donnée par le jeu, 10 par défaut).
+  // Decks construits selon une rotation (méta : dégâts / vol de vie / bouclier). Peu de cartes
+  // = rotations plus régulières : 8 par défaut, au choix du joueur.
+  const DECK_RECIPES = [
+    {
+      key: "vol-de-vie",
+      name: "Vol de vie",
+      desc: "La méta : dégâts, vol de vie, dégâts, vol de vie, bouclier.",
+      pattern: ["steal", "damage", "steal", "damage", "shield", "steal", "damage", "shield", "steal", "damage"],
+    },
+    {
+      key: "degats",
+      name: "Dégâts",
+      desc: "Plus agressif : surtout des dégâts, un peu de vol de vie et un bouclier.",
+      pattern: ["damage", "steal", "damage", "damage", "shield", "damage", "steal", "damage", "damage", "shield"],
+    },
+    {
+      key: "survie",
+      name: "Survie",
+      desc: "Pour tenir : boucliers et vol de vie.",
+      pattern: ["shield", "steal", "shield", "steal", "damage", "shield", "steal", "damage", "shield", "steal"],
+    },
+  ];
+  const FALLBACK = { steal: ["damage", "shield", "other"], damage: ["steal", "shield", "other"], shield: ["steal", "damage", "other"] };
+
   function buildDecks(args) {
     const size = args.deckSize || DECK_SIZE;
-    const { damage, support, other } = classifySpells(args);
-    const el = ELEMENTS[args.elementKey];
-    const recipes = [
-      { key: "degats", name: `Dégâts ${el.label}`, desc: "Le maximum de dégâts, un peu de soutien.", dmg: 7, sup: 3 },
-      { key: "equilibre", name: "Équilibré", desc: "Dégâts, protection et sorts utilitaires.", dmg: 5, sup: 3, oth: 2 },
-      { key: "survie", name: "Survie", desc: "Boucliers, soins et buffs pour tenir longtemps.", dmg: 4, sup: 6 },
-    ];
+    const roles = classifySpells(args);
     const decks = [];
-    for (const r of recipes) {
-      const picked = [
-        ...damage.slice(0, r.dmg),
-        ...support.slice(0, r.sup),
-        ...other.slice(0, r.oth || 0),
-      ];
-      // Complète jusqu'à 10 avec les meilleurs sorts restants.
-      const rest = [...damage, ...support, ...other].filter((x) => !picked.includes(x));
-      while (picked.length < size && rest.length) picked.push(rest.shift());
-      picked.splice(size);
+    for (const r of DECK_RECIPES) {
+      const taken = new Set();
+      const next = (role) => {
+        for (const rl of [role, ...FALLBACK[role]]) {
+          const card = roles[rl].find((x) => !taken.has(x.card.id));
+          if (card) return card;
+        }
+        return null;
+      };
+      const picked = [];
+      for (let i = 0; picked.length < size; i++) {
+        const card = next(r.pattern[i % r.pattern.length]);
+        if (!card) break;
+        taken.add(card.card.id);
+        picked.push(card);
+      }
       if (!picked.length) continue;
-      const ids = picked.map((x) => x.card.id).join(",");
-      if (decks.some((d) => d.cards.map((x) => x.card.id).join(",") === ids)) continue;
+      const ids = picked.map((x) => x.card.id).sort().join(",");
+      if (decks.some((d) => d.cards.map((x) => x.card.id).sort().join(",") === ids)) continue;
       decks.push({ ...r, cards: picked, size });
     }
     return decks;
@@ -371,5 +418,5 @@ var DMX_ADVISOR = (() => {
     return deck.cards.every((x) => active.has(x.card.id));
   }
 
-  return { ELEMENTS, DECK_SIZE, FUSION, deckIsActive, itemScore, fusedStats, setBonusScore, applyUpgrades, setsAdvice, inventoryCleanup, detectElement, buyPoints, planPoints, gearUpgrades, spellAdvice, buildDecks };
+  return { ELEMENTS, DECK_SIZE, FUSION, deckIsActive, itemScore, fusedStats, setBonusScore, applyUpgrades, setsAdvice, inventoryCleanup, detectElement, buyPoints, planPoints, resetAdvice, gearUpgrades, spellAdvice, buildDecks, spellRole };
 })();

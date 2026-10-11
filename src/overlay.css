@@ -1156,3 +1156,39 @@ input.dmx-highlight {
 #dmx-panel .dmx-header-icon.dmx-badge {
   position: relative;
 }
+
+/* ---------- Méta : réinitialisation, objectif niveau 200, rôles des sorts ---------- */
+
+#dmx-panel .dmx-callout-gold {
+  border-color: color-mix(in srgb, var(--dmx-gold) 45%, var(--dmx-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dmx-gold) 10%, transparent), transparent 60%);
+  font-size: 0.85rem;
+}
+
+#dmx-panel .dmx-level-goal {
+  margin-top: 4px;
+}
+
+#dmx-panel .dmx-level-goal .dmx-energy-bar span {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--dmx-leaf) 70%, #fff), var(--dmx-leaf));
+}
+
+#dmx-panel .dmx-deck-card {
+  position: relative;
+}
+
+/* Pastille de rôle en coin de chaque carte du deck. */
+#dmx-panel .dmx-role {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--dmx-night);
+}
+
+#dmx-panel .dmx-role-steal { background: #d9475f; }
+#dmx-panel .dmx-role-damage { background: var(--dmx-gold); }
+#dmx-panel .dmx-role-shield { background: #6fa3d6; }
+#dmx-panel .dmx-role-other { background: var(--dmx-dim); }

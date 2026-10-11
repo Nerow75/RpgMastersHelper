@@ -17,7 +17,8 @@
     collapsed: false, // panneau replié sur son en-tête
     doneToday: {}, // étapes cochées à la main : { clé: "AAAA-MM-JJ" }
     pos: null, // { left, top } si le joueur l'a déplacé
-    pointsMode: "optimal", // optimal | element | vitalite | libre
+    pointsMode: "sagesse", // sagesse | element | vitalite | libre (méta : tout dans une seule)
+    deckSize: 8, // moins de cartes = rotations plus régulières
     customPoints: {}, // mode libre : { clé de stat: points }
   };
   // Lu sur la page "Ma collection" : niveau + objets affichés (obtenus ou non), par nom.
@@ -166,7 +167,9 @@
       // Page Deck du jeu : sorts utilisables, deck actif, taille d'un deck.
       usableCardIds: character?.deck?.usableCardIds?.length ? new Set(character.deck.usableCardIds) : null,
       activeDeckIds: character?.deck?.activeDeckIds || [],
-      deckSize: character?.deck?.size || DMX_ADVISOR.DECK_SIZE,
+      // Taille choisie par le joueur, sans dépasser le maximum du jeu.
+      deckSize: Math.min(settings.deckSize || 8, character?.deck?.size || DMX_ADVISOR.DECK_SIZE),
+      maxDeckSize: character?.deck?.size || DMX_ADVISOR.DECK_SIZE,
     };
   }
 
@@ -248,7 +251,7 @@
   // ---------- Onglet Conseils ----------
 
   const POINT_MODES = [
-    ["optimal", "Recommandé"],
+    ["sagesse", "Tout Sagesse (XP)"],
     ["element", "Tout élément"],
     ["vitalite", "Tout Vitalité"],
     ["libre", "Libre"],
@@ -259,20 +262,30 @@
     if (!c || !c.rows.length || c.pointsFree == null) {
       return `<p class="dmx-empty">Fiche personnage pas encore lue.</p>`;
     }
-    if (c.pointsFree === 0) return `<p>Aucun point libre : tout est déjà placé.</p>`;
     const el = ELEMENTS[s.elementKey];
     const mode = settings.pointsMode;
-    const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, mode, s.elementKey, settings.customPoints);
-
     const modes = POINT_MODES.map(
       ([key, label]) => `<button class="dmx-chip dmx-mode${key === mode ? " active" : ""}" data-mode="${key}">
         ${key === "element" ? `Tout ${el.statLabel}` : label}</button>`
     ).join("");
+    // Points placés ailleurs : la réinitialisation est gratuite dans le jeu.
+    const reset = DMX_ADVISOR.resetAdvice(c.rows, c.pointsFree, mode, s.elementKey);
+    const resetHtml = reset
+      ? `<div class="dmx-callout dmx-callout-gold">Tu as des points en ${reset.elsewhere.map((r) => escapeHtml(r.label)).join(", ")}.
+          La réinitialisation est <strong>gratuite</strong> : avec « ↺ Réinitialiser » sur la page Personnage,
+          tu récupères ${reset.total} points, soit <strong>${reset.after} ${escapeHtml(reset.row.label)}</strong>
+          (au lieu de ${reset.now}).
+          <div class="dmx-todo-actions"><a class="dmx-btn-ghost" href="/personnage">Ouvrir Personnage →</a></div></div>`
+      : "";
+    if (c.pointsFree === 0) {
+      return `<div class="dmx-modes">${modes}</div>${resetHtml || `<p>Aucun point libre : tout est déjà placé.</p>`}`;
+    }
+    const plan = DMX_ADVISOR.planPoints(c.rows, c.pointsFree, mode, s.elementKey, settings.customPoints);
 
     const why = {
-      optimal: `Chaque point va là où il rapporte le plus : ${el.statLabel} tant qu'elle coûte peu,
-        puis Vitalité quand ${el.statLabel} devient trop chère (paliers de coût du jeu).`,
-      element: `Maximum de dégâts ${el.label}, au détriment de la vie.`,
+      sagesse: `La méta : tout en Sagesse pour gagner plus d'XP et atteindre vite le niveau 200 (prestiges).
+        Les dégâts viennent de ton équipement et de ton deck.`,
+      element: `Tout en ${el.statLabel} : plus de dégâts ${el.label}, mais tu montes moins vite.`,
       vitalite: "Maximum de points de vie, pour encaisser.",
       libre: "Choisis toi-même combien de points mettre dans chaque caractéristique.",
     }[mode];
@@ -303,15 +316,11 @@
       }${plan.left ? `<br><span class="dmx-dim">Reste ${plan.left} point${plan.left > 1 ? "s" : ""}.</span>` : ""}</div>`;
     }
 
-    const wasted = plan.wasted
-      .map((row) => `<p class="dmx-warn">⚠ ${row.base} points en ${escapeHtml(row.label)} ne servent pas un
-        build ${el.label}.</p>`)
-      .join("");
     const fill = plan.alloc.length
       ? `<div class="dmx-todo-actions"><button class="dmx-btn-primary" data-fill-points>Remplir pour moi</button></div>` : "";
     return `<p>Tu as <strong>${c.pointsFree}</strong> points à placer.</p>
       <div class="dmx-modes">${modes}</div>
-      <p class="dmx-dim">${why}</p>${result}${wasted}${fill}`;
+      <p class="dmx-dim">${why}</p>${result}${fill}${resetHtml}`;
   }
 
   // Améliorations possibles avec l'inventaire (calculées une fois par rendu).
@@ -395,6 +404,7 @@
       ownedCardIds: s.ownedCardIds,
       usableCardIds: s.usableCardIds,
       deckSize: s.deckSize,
+      passive: s.cat.classes.find((c) => c.id === s.classId)?.passive,
     };
   }
 
@@ -433,6 +443,19 @@
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
+    // Monter de niveau : on ne peut pas le détecter, le joueur le coche lui-même (une fois par jour).
+    if (settings.doneToday?.combat !== today()) {
+      const toGo = s.level != null && s.level < LEVEL_GOAL ? ` (encore ${LEVEL_GOAL - s.level} niveaux avant ${LEVEL_GOAL})` : "";
+      steps.push({
+        key: "combat",
+        title: "Monte de niveau en masse",
+        text: `Dans la Chasse, prends les groupes avec des Recherchés et des Archimages, puis avance dans
+          l'Aventure pour passer les paliers${toGo}.`,
+        doneTitle: "Session de montée de niveau faite",
+        links: [["/chasse", "Chasse"], ["/aventure", "Aventure"]],
+        manual: true,
+      });
+    }
     const upgrades = upgradesFor(s);
     for (const u of upgrades.slice(0, 3)) {
       steps.push({
@@ -460,18 +483,6 @@
           link: ["/deck", "Ouvrir Deck"],
         });
       }
-    }
-    // Combat : on ne peut pas le détecter, le joueur le coche lui-même (une fois par jour).
-    if (settings.doneToday?.combat !== today()) {
-      steps.push({
-        key: "combat",
-        title: "Combats pour progresser",
-        text: `Dans la Chasse, affronte les Recherchés et les Archimages ; ou avance dans l'Aventure
-          pour passer des paliers.`,
-        doneTitle: "Combats du jour faits",
-        links: [["/chasse", "Chasse"], ["/aventure", "Aventure"]],
-        manual: true,
-      });
     }
     return steps;
   }
@@ -544,6 +555,8 @@
   }
 
   const formatKamas = (k) => new Intl.NumberFormat("fr-FR").format(k);
+  // Objectif de la méta : le niveau 200, pour passer les prestiges.
+  const LEVEL_GOAL = 200;
 
   function formatDelay(ms) {
     const minutes = Math.ceil(ms / 60000);
@@ -571,6 +584,9 @@
           <div class="dmx-profile-name">${escapeHtml(c?.name || "Ton personnage")}</div>
           <div class="dmx-dim">${escapeHtml(details.join(" · ") || "Connecte-toi pour voir ton personnage")}
             ${s.prestige ? help("Chaque prestige donne des bonus permanents en combat (PA, PM, portée).") : ""}</div>
+          ${s.level != null ? `<div class="dmx-level-goal" title="Niveau ${LEVEL_GOAL} : prestige">
+            <div class="dmx-energy-bar"><span style="width:${Math.min(100, Math.round((100 * s.level) / LEVEL_GOAL))}%"></span></div>
+            <span class="dmx-stat-sub">${s.level >= LEVEL_GOAL ? "Niveau 200 atteint : prestige possible !" : `${s.level} / ${LEVEL_GOAL} avant prestige`}</span></div>` : ""}
         </div>
       </div>
       <div class="dmx-stats">
@@ -602,11 +618,14 @@
   const spellIcon = (card) =>
     card.icon != null ? `<img src="/img/spells/sort_${encodeURIComponent(card.icon)}.png" alt="" loading="lazy">` : "";
 
-  function cardHtml({ card, owned, perAp }, elementKey) {
+  const ROLE_LABELS = { steal: "🩸 Vol de vie", damage: "⚔ Dégâts", shield: "🛡 Protection", other: "✦ Utilitaire" };
+
+  function cardHtml({ card, owned, perAp, role, synergy }, elementKey) {
     const chips = [`<span class="dmx-chip">${card.ap} PA</span>`];
-    if (perAp != null) {
-      chips.push(`<span class="dmx-chip dmx-chip-el dmx-el-${elementKey}">~${Math.round(perAp)} dégâts/PA</span>`);
+    if (perAp && (role === "steal" || role === "damage")) {
+      chips.push(`<span class="dmx-chip dmx-chip-el dmx-el-${elementKey}">~${Math.round(perAp)}/PA</span>`);
     }
+    if (synergy) chips.push(`<span class="dmx-chip dmx-chip-target">★ Passif</span>`);
     if (owned === false) chips.push(`<span class="dmx-chip">non obtenu</span>`);
     return `<li class="dmx-row dmx-spell${owned === false ? " dmx-locked" : ""}">
       <span class="dmx-spell-icon">${spellIcon(card)}</span>
@@ -620,8 +639,9 @@
   function deckHtml(deck, s, index) {
     const missing = deck.cards.filter((x) => x.owned === false).length;
     const tiles = deck.cards
-      .map(({ card, owned }) => `<span class="dmx-deck-card${owned === false ? " dmx-locked" : ""}"
-        title="${escapeHtml(`${card.n} · ${card.ap} PA${card.d ? `\n${card.d}` : ""}`)}">${spellIcon(card)}</span>`)
+      .map(({ card, owned, role }) => `<span class="dmx-deck-card${owned === false ? " dmx-locked" : ""}"
+        title="${escapeHtml(`${card.n} · ${card.ap} PA · ${ROLE_LABELS[role]}${card.d ? `\n${card.d}` : ""}`)}">${spellIcon(card)}
+        <span class="dmx-role dmx-role-${role}"></span></span>`)
       .join("");
     const names = deck.cards.map(({ card }) => escapeHtml(card.n)).join(" · ");
     const active = DMX_ADVISOR.deckIsActive(deck, s.activeDeckIds);
@@ -644,27 +664,31 @@
   }
 
   function renderSpells(s) {
-    const intro = `<p class="dmx-intro">Des decks de ${s.deckSize} sorts prêts à l'emploi pour ta classe et ton élément.
-      Clique sur « Copier le code », puis dans <strong>Deck</strong> → <strong>Importer un code</strong>, colle-le.</p>`;
+    const intro = `<p class="dmx-intro">Des decks prêts à l'emploi selon la méta : dégâts, vol de vie et boucliers,
+      en tenant compte de ton passif. Clique sur « Copier le code », puis dans <strong>Deck</strong> →
+      <strong>Importer un code</strong>, colle-le.</p>`;
     if (s.classId == null) return `${intro}<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
     const cls = s.cat.classes.find((c) => c.id === s.classId);
     const args = deckArgs(s);
     currentDecks = DMX_ADVISOR.buildDecks(args);
-    const { damage, support } = DMX_ADVISOR.spellAdvice(args);
-    const el = ELEMENTS[s.elementKey];
+    const roles = DMX_ADVISOR.spellAdvice(args);
+    const sizes = [];
+    for (let n = 8; n <= s.maxDeckSize; n++) sizes.push(n);
+    const sizeChips = sizes.map((n) => `<button class="dmx-chip dmx-mode${n === s.deckSize ? " active" : ""}" data-deck-size="${n}">${n} cartes</button>`).join("");
+    const list = (key, max) => roles[key].length
+      ? `<ul>${roles[key].slice(0, max).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
+      : `<p class="dmx-empty">Aucun.</p>`;
     return `${intro}
       ${cls ? `<section><h4>${escapeHtml(cls.n)} · ${escapeHtml(cls.role || "")}</h4>
         ${cls.passive ? `<div class="dmx-callout"><strong>${escapeHtml(cls.passive.name)}</strong> —
           ${escapeHtml(cls.passive.desc)}</div>` : ""}</section>` : ""}
-      <section><h4>Decks proposés</h4>
+      <section><h4>Decks proposés ${help("Moins de cartes dans le deck = tu retombes plus souvent sur tes meilleurs sorts. 8 cartes donnent des rotations plus régulières que 10.")}</h4>
+        <div class="dmx-modes">${sizeChips}</div>
         ${currentDecks.length ? currentDecks.map((d, i) => deckHtml(d, s, i)).join("")
           : `<p class="dmx-empty">Aucun sort connu pour cette classe pour l'instant.</p>`}</section>
-      <section><h4>Meilleurs sorts de dégâts ${el.label}</h4>
-        ${damage.length ? `<ul>${damage.slice(0, 8).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
-          : `<p class="dmx-empty">Aucun sort de dégâts ${el.label} connu pour cette classe.</p>`}</section>
-      <section><h4>Soutien · boucliers, soins, buffs</h4>
-        ${support.length ? `<ul>${support.slice(0, 5).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
-          : `<p class="dmx-empty">Aucun.</p>`}</section>`;
+      <section><h4>${ROLE_LABELS.steal}</h4>${list("steal", 5)}</section>
+      <section><h4>${ROLE_LABELS.damage}</h4>${list("damage", 5)}</section>
+      <section><h4>${ROLE_LABELS.shield}</h4>${list("shield", 4)}</section>`;
   }
 
   // ---------- Onglet Bestiaire ----------
@@ -1023,6 +1047,13 @@
       render();
       return;
     }
+    const deckSize = e.target.closest("[data-deck-size]")?.dataset.deckSize;
+    if (deckSize) {
+      settings.deckSize = Number(deckSize);
+      save();
+      render();
+      return;
+    }
     const mode = e.target.closest("[data-mode]")?.dataset.mode;
     if (!mode) return;
     settings.pointsMode = mode;
@@ -1218,6 +1249,7 @@
   (async () => {
     const stored = await chrome.storage.local.get([STORAGE_KEY, PROFILE_KEY]);
     settings = { ...settings, ...stored[STORAGE_KEY] };
+    if (settings.pointsMode === "optimal") settings.pointsMode = "sagesse"; // ancienne stratégie mixte
     if (stored[PROFILE_KEY]) profile = { ...profile, ...stored[PROFILE_KEY] };
     await DMX_CATALOG.load();
     render();
