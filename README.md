@@ -290,6 +290,10 @@ des pages du site (HTML, feuilles de style, polices et images réels) et des don
 du jeu. Ces tests ont couvert le décodage des données, les calculs de points, l'équipement,
 l'encodage des codes de deck (comparé à celui du site), l'interface et la mémorisation de la position.
 
+**Publier une version** : augmenter `version` dans `manifest.json` (et, si besoin, écrire les
+notes dans `docs/releases/vX.Y.Z.md`), puis pousser sur `main`. Le workflow
+`.github/workflows/release.yml` crée le tag, la release GitHub et y joint l'extension zippée.
+
 ---
 
 ## Limites connues
