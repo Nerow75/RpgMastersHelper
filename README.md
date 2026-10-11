@@ -11,6 +11,12 @@ Toutes les informations viennent **du jeu lui-même**, relues automatiquement : 
 change côté serveur, l'extension s'aligne sans mise à jour de son code. Elle ne fait que
 **lire** les pages du jeu ; elle ne déclenche aucune action à la place du joueur.
 
+> **L'esprit du projet.** RpgMasters Helper ne cherche pas à optimiser parfaitement le jeu ni
+> à jouer à la place de qui que ce soit. C'est un **guide** : il aide les nouveaux joueurs à
+> comprendre le jeu, à éviter les erreurs qui découragent et à progresser **en prenant du
+> plaisir**. Les conseils sont des repères simples, pas des calculs exacts : chacun reste libre
+> de les suivre, de les ajuster ou de jouer à sa façon.
+
 | Conseils | Sorts | Bestiaire |
 | :---: | :---: | :---: |
 | ![Onglet Conseils](docs/images/conseils.png) | ![Onglet Sorts](docs/images/sorts.png) | ![Onglet Bestiaire](docs/images/bestiaire.png) |
@@ -104,17 +110,20 @@ Les points de caractéristique vont donc **tous dans une seule caractéristique*
 
 ## Principes
 
-1. **Lecture seule.** L'extension lit les pages que le joueur peut déjà consulter. Elle ne
+1. **Guider plutôt qu'optimiser.** Le but est d'aider à démarrer et à prendre du plaisir, pas
+   de calculer le build parfait. Les estimations restent simples et chaque conseil laisse le
+   choix au joueur (mode libre pour les points, decks au choix, étapes à ignorer).
+2. **Lecture seule.** L'extension lit les pages que le joueur peut déjà consulter. Elle ne
    déclenche aucune action de jeu et ne contourne aucune règle (par exemple, elle ne permet
    pas de changer d'équipement en combat). Pour équiper un objet ou un deck, elle prépare un
    code au format du jeu ; c'est le joueur qui l'importe, via l'interface et les vérifications
    du jeu.
-2. **Aucune donnée en dur.** Objets, monstres, sorts, classes, coûts des caractéristiques :
+3. **Aucune donnée en dur.** Objets, monstres, sorts, classes, coûts des caractéristiques :
    tout est lu sur le site. Seule la *façon d'interpréter* ces données (poids des stats,
    composition des decks) est propre à l'extension.
-3. **Sobriété envers le serveur.** Les données sont mises en cache localement et rafraîchies
+4. **Sobriété envers le serveur.** Les données sont mises en cache localement et rafraîchies
    rarement (voir [Fonctionnement technique](#fonctionnement-technique)).
-4. **Aucune donnée ne quitte le navigateur du joueur.**
+5. **Aucune donnée ne quitte le navigateur du joueur.**
 
 ---
 
