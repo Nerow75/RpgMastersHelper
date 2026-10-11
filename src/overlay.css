@@ -1081,9 +1081,11 @@
 }
 
 #dmx-panel .dmx-stat-sub {
+  overflow: hidden;
   font-size: 0.66rem;
   color: var(--dmx-dim);
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 #dmx-panel .dmx-energy-bar {
@@ -1192,3 +1194,13 @@ input.dmx-highlight {
 #dmx-panel .dmx-role-damage { background: var(--dmx-gold); }
 #dmx-panel .dmx-role-shield { background: #6fa3d6; }
 #dmx-panel .dmx-role-other { background: var(--dmx-dim); }
+
+#dmx-panel .dmx-deck-elements {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--dmx-dim);
+}

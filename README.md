@@ -40,7 +40,7 @@ Les conseils suivent la **méta de RpgMasters**, différente de celle de DOFUS :
 monter de niveau le plus vite possible pour atteindre le niveau 200 et passer les prestiges.
 Les points de caractéristique vont donc **tous dans une seule caractéristique**, par défaut la
 **Sagesse** (bonus d'XP) ; les dégâts viennent de l'équipement et du deck, construit autour du
-**vol de vie**.
+**vol de vie** et **multi-élément** (les monstres ne résistent pas tous aux mêmes éléments).
 
 ### Conseils
 - **À faire maintenant** : une liste d'actions concrètes et ordonnées (placer ses points,
@@ -67,7 +67,8 @@ Les points de caractéristique vont donc **tous dans une seule caractéristique*
 - Boutons **« Équiper »** et **« Tout équiper »** : ouvrent la page Personnage avec un code
   d'équipement `DM-E-…` déjà collé dans le champ « Codes d'équipement ». Le joueur clique sur
   « Importer », le jeu demande confirmation et équipe les objets possédés. Les emplacements
-  vides sont aussi remplis.
+  vides sont aussi remplis. Dans « À faire maintenant », un seul code équipe d'un coup tous
+  les objets conseillés.
 - **Panoplies** : pièces portées, bonus actif, prochain palier et pièces déjà dans l'inventaire.
 - **Ménage de l'inventaire** : objets à fusionner (3 copies) et objets inutiles pour le build
   (moins bons que ceux portés, hors panoplie portée, non verrouillés), à vendre ou briser.
@@ -78,7 +79,8 @@ Les points de caractéristique vont donc **tous dans une seule caractéristique*
 - Sorts classés par rôle : **vol de vie**, **dégâts**, **protection** (boucliers, soins,
   résistances), avec ceux qui vont avec le **passif** de la classe mis en avant.
 - **Trois decks** construits par rotation : *Vol de vie* (la méta : dégâts, vol de vie, dégâts,
-  vol de vie, bouclier), *Dégâts* et *Survie*. **8 cartes par défaut** (moins de cartes = des
+  vol de vie, bouclier), *Dégâts* et *Survie*, **multi-éléments** : à valeur proche, un sort
+  d'un élément absent du deck passe devant (éléments du deck affichés). **8 cartes par défaut** (moins de cartes = des
   rotations plus régulières), 9 ou 10 au choix. Uniquement des sorts que le personnage peut
   utiliser ; le deck déjà équipé est signalé.
 - Bouton **« Copier le code du deck »** : génère un code au format officiel `DM-S-…`, à coller
@@ -190,10 +192,11 @@ une page échoue, les autres sont conservées et l'erreur est signalée dans le 
   `WEIGHTS`, `src/advisor.js` ; par exemple 1 PA ≈ 100 points de stat principale ; la Sagesse
   vaut autant que la stat de l'élément, pour l'XP). C'est une estimation, ajustable.
 - **Decks** : sorts utilisables par le personnage (liste fournie par la page Deck), classés par
-  rôle puis par valeur par PA (dégâts moyens dans l'élément, ou montant du bouclier / soin),
+  rôle puis par valeur par PA (dégâts moyens, tous éléments, ou montant du bouclier / soin),
   ×1,3 en synergie avec le passif (mots-clés de sa description : « 2 PA ou moins »,
   « bouclier / soin / résistance », « invocation »…). Chaque deck suit un motif de rôles ; si
-  un rôle manque, le meilleur sort d'un rôle voisin le remplace. Un deck est considéré comme
+  un rôle manque, le meilleur sort d'un rôle voisin le remplace. Pour les dégâts, un sort d'un
+  élément pas encore couvert vaut ×1,2 et un élément déjà présent ×0,8 par sort de cet élément. Un deck est considéré comme
   équipé si le deck actif contient tous ses sorts.
 - **Codes d'équipement** : format déduit d'un code fourni par le site. Avant de proposer ses
   propres codes, l'extension vérifie qu'elle **reproduit exactement** le code de l'équipement

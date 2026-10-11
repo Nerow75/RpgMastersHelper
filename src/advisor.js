@@ -312,16 +312,22 @@ var DMX_ADVISOR = (() => {
     return false;
   }
 
-  // Valeur d'un sort par PA : dégâts moyens dans l'élément (les autres éléments comptent moins),
-  // ou montant du bouclier / soin pour la protection ; ×1,3 en synergie avec le passif.
-  function spellValue(card, role, el) {
+  // Éléments des dégâts d'un sort (codes 1 à 4, ou "best" = s'adapte au meilleur élément).
+  function cardElements(card) {
+    const els = new Set();
+    for (const e of card.eff || []) if (DAMAGE_KINDS.includes(e.k) && e.el != null) els.add(e.el);
+    return [...els];
+  }
+
+  // Valeur d'un sort par PA : dégâts moyens, quel que soit l'élément (les decks sont
+  // multi-éléments : les monstres résistent à des éléments différents), ou montant du
+  // bouclier / soin pour la protection ; ×1,3 en synergie avec le passif.
+  function spellValue(card, role) {
     const eff = card.eff || [];
     let value = 0;
     if (role === "steal" || role === "damage") {
-      const dmg = eff.filter((e) => DAMAGE_KINDS.includes(e.k));
       const avg = (e) => ((e.min || 0) + (e.max ?? e.min ?? 0)) / 2;
-      const inElement = dmg.filter((e) => e.el == null || e.el === el.code || e.el === "best");
-      value = inElement.length ? inElement.reduce((sum, e) => sum + avg(e), 0) : Math.max(0, ...dmg.map(avg)) * 0.7;
+      value = eff.filter((e) => DAMAGE_KINDS.includes(e.k)).reduce((sum, e) => sum + avg(e), 0);
     } else {
       value = eff.reduce((sum, e) => sum + (e.min || 0), 0);
     }
@@ -331,8 +337,7 @@ var DMX_ADVISOR = (() => {
   // Classe les sorts utilisables par rôle, du plus rentable au moins rentable.
   // `usableCardIds` (page Deck du jeu) : si connu, seuls ces sorts sont proposés, car le jeu
   // refuse les autres à l'import d'un code de deck.
-  function classifySpells({ cards, classId, level, elementKey, ownedCardIds, usableCardIds, passive }) {
-    const el = ELEMENTS[elementKey];
+  function classifySpells({ cards, classId, level, ownedCardIds, usableCardIds, passive }) {
     const roles = { steal: [], damage: [], shield: [], other: [] };
     for (const card of cards) {
       if (usableCardIds) {
@@ -346,8 +351,9 @@ var DMX_ADVISOR = (() => {
         card,
         role,
         synergy,
+        elements: cardElements(card),
         owned: usableCardIds ? true : ownedCardIds ? ownedCardIds.has(card.id) : null,
-        perAp: spellValue(card, role, el) * (synergy ? 1.3 : 1),
+        perAp: spellValue(card, role) * (synergy ? 1.3 : 1),
       });
     }
     const byValue = (a, b) => (b.owned !== false) - (a.owned !== false) || b.perAp - a.perAp;
@@ -365,7 +371,7 @@ var DMX_ADVISOR = (() => {
     {
       key: "vol-de-vie",
       name: "Vol de vie",
-      desc: "La méta : dégâts, vol de vie, dégâts, vol de vie, bouclier.",
+      desc: "La méta : dégâts, vol de vie, dégâts, vol de vie, bouclier, sur plusieurs éléments.",
       pattern: ["steal", "damage", "steal", "damage", "shield", "steal", "damage", "shield", "steal", "damage"],
     },
     {
@@ -383,16 +389,35 @@ var DMX_ADVISOR = (() => {
   ];
   const FALLBACK = { steal: ["damage", "shield", "other"], damage: ["steal", "shield", "other"], shield: ["steal", "damage", "other"] };
 
+  // Multi-élément : à valeur proche, on préfère un sort d'un élément pas encore dans le deck,
+  // pour ne pas buter sur un monstre qui résiste à un élément.
+  const NEW_ELEMENT_BONUS = 1.2;
+  const SAME_ELEMENT_FACTOR = 0.8;
+
   function buildDecks(args) {
     const size = args.deckSize || DECK_SIZE;
     const roles = classifySpells(args);
     const decks = [];
     for (const r of DECK_RECIPES) {
       const taken = new Set();
+      const covered = new Map(); // élément -> nombre de sorts du deck
+      const weight = (x) => {
+        if (!x.elements.length) return 1;
+        if (x.elements.includes("best")) return NEW_ELEMENT_BONUS; // s'adapte au monstre
+        const seen = Math.min(...x.elements.map((el) => covered.get(el) || 0));
+        return seen === 0 ? NEW_ELEMENT_BONUS : SAME_ELEMENT_FACTOR ** seen;
+      };
       const next = (role) => {
         for (const rl of [role, ...FALLBACK[role]]) {
-          const card = roles[rl].find((x) => !taken.has(x.card.id));
-          if (card) return card;
+          let best = null;
+          for (const x of roles[rl]) {
+            if (taken.has(x.card.id)) continue;
+            // Un sort non obtenu ne passe jamais devant un sort obtenu.
+            if (best && best.owned !== false && x.owned === false) break;
+            const score = x.perAp * (rl === "steal" || rl === "damage" ? weight(x) : 1);
+            if (!best || score > best.score) best = { ...x, score };
+          }
+          if (best) return best;
         }
         return null;
       };
@@ -401,12 +426,14 @@ var DMX_ADVISOR = (() => {
         const card = next(r.pattern[i % r.pattern.length]);
         if (!card) break;
         taken.add(card.card.id);
+        for (const el of card.elements) covered.set(el, (covered.get(el) || 0) + 1);
         picked.push(card);
       }
       if (!picked.length) continue;
       const ids = picked.map((x) => x.card.id).sort().join(",");
       if (decks.some((d) => d.cards.map((x) => x.card.id).sort().join(",") === ids)) continue;
-      decks.push({ ...r, cards: picked, size });
+      const elements = Object.keys(ELEMENTS).filter((k) => covered.has(ELEMENTS[k].code));
+      decks.push({ ...r, cards: picked, size, elements, adaptive: covered.has("best") });
     }
     return decks;
   }
@@ -418,5 +445,5 @@ var DMX_ADVISOR = (() => {
     return deck.cards.every((x) => active.has(x.card.id));
   }
 
-  return { ELEMENTS, DECK_SIZE, FUSION, deckIsActive, itemScore, fusedStats, setBonusScore, applyUpgrades, setsAdvice, inventoryCleanup, detectElement, buyPoints, planPoints, resetAdvice, gearUpgrades, spellAdvice, buildDecks, spellRole };
+  return { ELEMENTS, DECK_SIZE, FUSION, deckIsActive, itemScore, fusedStats, setBonusScore, applyUpgrades, setsAdvice, inventoryCleanup, detectElement, buyPoints, planPoints, resetAdvice, gearUpgrades, spellAdvice, buildDecks, spellRole, cardElements };
 })();

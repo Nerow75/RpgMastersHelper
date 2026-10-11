@@ -456,15 +456,22 @@
         manual: true,
       });
     }
+    // Équipement : une seule étape avec un code qui équipe tout ce qui est conseillé.
     const upgrades = upgradesFor(s);
-    for (const u of upgrades.slice(0, 3)) {
+    if (upgrades.length) {
+      const one = upgrades.length === 1 ? upgrades[0] : null;
+      const gain = upgrades.reduce((sum, u) => sum + u.gain, 0);
       steps.push({
-        key: `equip:${u.to.item.id}`,
-        title: `Équipe ${u.to.item.n}`,
-        text: `${u.label} : ${u.from ? `à la place de ${u.from.item.n}` : "emplacement vide"}. Tu l'as déjà
-          dans ton inventaire (+${u.gain} pts).`,
-        doneTitle: `${u.to.item.n} équipé`,
-        gearCode: gearCodeFor(s, [u]),
+        key: "equip",
+        title: one ? `Équipe ${one.to.item.n}` : `Équipe tes ${upgrades.length} meilleurs objets`,
+        text: one
+          ? `${one.label} : ${one.from ? `à la place de ${one.from.item.n}` : "emplacement vide"}. Tu l'as déjà
+            dans ton inventaire (+${one.gain} pts).`
+          : `${upgrades.map((u) => u.to.item.n).join(", ")} : tous déjà dans ton inventaire (+${gain} pts).
+            Un seul code équipe tout ; le détail est dans « Équipement à changer ».`,
+        doneTitle: one ? `${one.to.item.n} équipé` : "Meilleur équipement mis",
+        gearCode: gearCodeFor(s, upgrades),
+        gearLabel: one ? "Équiper" : `Tout équiper (${upgrades.length})`,
         link: ["/personnage", "Ouvrir Personnage"],
       });
     }
@@ -507,7 +514,7 @@
         <div class="dmx-dim">${escapeHtml(step.text)}</div>
         <div class="dmx-todo-actions">
           ${step.deck != null ? `<button class="dmx-btn-primary" data-deck="${step.deck}">Copier le code</button>` : ""}
-          ${step.gearCode ? `<button class="dmx-btn-primary" data-gear-code="${escapeHtml(step.gearCode)}">Équiper</button>` : ""}
+          ${step.gearCode ? `<button class="dmx-btn-primary" data-gear-code="${escapeHtml(step.gearCode)}">${escapeHtml(step.gearLabel || "Équiper")}</button>` : ""}
           ${step.fillPoints ? `<button class="dmx-btn-primary" data-fill-points>Remplir pour moi</button>` : ""}
           ${step.link ? `<a class="dmx-btn-ghost" href="${step.link[0]}">${step.link[1]} →</a>` : ""}
           ${(step.links || []).map(([href, label]) => `<a class="dmx-btn-ghost" href="${href}">${label} →</a>`).join("")}
@@ -596,7 +603,7 @@
           <div class="dmx-stat-value">${energy ? `${energy.value}${energy.max ? `<small>/${energy.max}</small>` : ""}` : "?"}</div>
           ${pct != null ? `<div class="dmx-energy-bar"><span style="width:${pct}%"></span></div>` : ""}
           ${energy?.nextIn != null ? `<div class="dmx-stat-sub">+1 dans ${formatDelay(energy.nextIn)}</div>`
-            : energy && energy.max && energy.value >= energy.max ? `<div class="dmx-stat-sub" title="La recharge reprend quand tu dépenses de l'énergie">pleine · recharge en pause</div>` : ""}</div>
+            : energy && energy.max && energy.value >= energy.max ? `<div class="dmx-stat-sub" title="Pleine : la recharge reprend quand tu dépenses de l'énergie">pleine</div>` : ""}</div>
         <div class="dmx-stat dmx-el-${s.elementKey}"><div class="dmx-stat-label">Élément · ${how}</div>
           <div class="dmx-stat-value dmx-el-${s.elementKey}">${el.label}</div></div>
       </div>`;
@@ -620,10 +627,19 @@
 
   const ROLE_LABELS = { steal: "🩸 Vol de vie", damage: "⚔ Dégâts", shield: "🛡 Protection", other: "✦ Utilitaire" };
 
-  function cardHtml({ card, owned, perAp, role, synergy }, elementKey) {
+  // Élément d'un sort pour l'affichage : clé de ELEMENTS, "best" (s'adapte) ou null.
+  const ELEMENT_BY_CODE = Object.fromEntries(Object.entries(ELEMENTS).map(([k, e]) => [e.code, k]));
+
+  function elementChips(elements) {
+    return elements.map((el) => el === "best"
+      ? `<span class="dmx-chip" title="S'adapte au meilleur élément contre la cible">Adaptatif</span>`
+      : ELEMENT_BY_CODE[el] ? `<span class="dmx-chip dmx-chip-el dmx-el-${ELEMENT_BY_CODE[el]}">${ELEMENTS[ELEMENT_BY_CODE[el]].label}</span>` : "").join("");
+  }
+
+  function cardHtml({ card, owned, perAp, role, synergy, elements }) {
     const chips = [`<span class="dmx-chip">${card.ap} PA</span>`];
     if (perAp && (role === "steal" || role === "damage")) {
-      chips.push(`<span class="dmx-chip dmx-chip-el dmx-el-${elementKey}">~${Math.round(perAp)}/PA</span>`);
+      chips.push(elementChips(elements || []), `<span class="dmx-chip">~${Math.round(perAp)}/PA</span>`);
     }
     if (synergy) chips.push(`<span class="dmx-chip dmx-chip-target">★ Passif</span>`);
     if (owned === false) chips.push(`<span class="dmx-chip">non obtenu</span>`);
@@ -652,6 +668,9 @@
         ${active ? `<span class="dmx-chip dmx-chip-up">✔ Ton deck actuel</span>` : ""}
         ${missing ? `<span class="dmx-chip">${missing} non obtenu${missing > 1 ? "s" : ""}</span>` : ""}</div>
       <div class="dmx-dim">${escapeHtml(deck.desc)}</div>
+      ${deck.elements.length || deck.adaptive ? `<div class="dmx-deck-elements">${deck.elements.length > 1 ? "Multi-élément : " : "Élément : "}
+        ${deck.elements.map((k) => `<span class="dmx-chip dmx-chip-el dmx-el-${k}">${ELEMENTS[k].label}</span>`).join("")}
+        ${deck.adaptive ? `<span class="dmx-chip" title="Certains sorts s'adaptent au meilleur élément contre la cible">+ adaptatif</span>` : ""}</div>` : ""}
       ${short ? `<p class="dmx-warn">Tu n'as que ${deck.cards.length} sorts utilisables : débloque-en d'autres
         pour compléter ce deck.</p>` : ""}
       <div class="dmx-deck-grid">${tiles}</div>
@@ -665,7 +684,7 @@
 
   function renderSpells(s) {
     const intro = `<p class="dmx-intro">Des decks prêts à l'emploi selon la méta : dégâts, vol de vie et boucliers,
-      en tenant compte de ton passif. Clique sur « Copier le code », puis dans <strong>Deck</strong> →
+      sur plusieurs éléments (les monstres ne résistent pas tous aux mêmes), en tenant compte de ton passif. Clique sur « Copier le code », puis dans <strong>Deck</strong> →
       <strong>Importer un code</strong>, colle-le.</p>`;
     if (s.classId == null) return `${intro}<p class="dmx-empty">Choisis ta classe en haut du panneau.</p>`;
     const cls = s.cat.classes.find((c) => c.id === s.classId);
@@ -676,7 +695,7 @@
     for (let n = 8; n <= s.maxDeckSize; n++) sizes.push(n);
     const sizeChips = sizes.map((n) => `<button class="dmx-chip dmx-mode${n === s.deckSize ? " active" : ""}" data-deck-size="${n}">${n} cartes</button>`).join("");
     const list = (key, max) => roles[key].length
-      ? `<ul>${roles[key].slice(0, max).map((d) => cardHtml(d, s.elementKey)).join("")}</ul>`
+      ? `<ul>${roles[key].slice(0, max).map((d) => cardHtml(d)).join("")}</ul>`
       : `<p class="dmx-empty">Aucun.</p>`;
     return `${intro}
       ${cls ? `<section><h4>${escapeHtml(cls.n)} · ${escapeHtml(cls.role || "")}</h4>
